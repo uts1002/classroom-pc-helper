@@ -1,7 +1,8 @@
 # classroom-pc-helper — 작업 지시
 
 교실 PC의 흔한 설정 문제(화면·소리·프린터·인터넷)를 선생님이 직접 해결하게 돕는 바탕화면 프로그램.
-무엇을 왜 만드는지는 README.md를 먼저 읽는다.
+무엇을 왜 만드는지는 README.md, 지금까지 정한 것과 다음 할 일은 DECISIONS.md를 먼저 읽는다.
+결정이 생기면 DECISIONS.md에 날짜와 함께 짧게 적는다. 새 버전 배포는 `release.ps1` (README 참고).
 
 ## 규칙
 
