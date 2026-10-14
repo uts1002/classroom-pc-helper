@@ -3,7 +3,7 @@
 #
 # 실행: powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File PcHelper.ps1
 #   -NoPin        바탕화면에 고정하지 않고 보통 창으로 띄움 (테스트용)
-#   -Open <갈래>  켜자마자 도우미 창을 연다: display | touch | audio | print | net | pc (테스트용)
+#   -Open <갈래>  켜자마자 도우미 창을 연다: display | touch | audio | print | net | pc | app (테스트용)
 
 param([switch]$NoPin, [string]$Open)
 
@@ -96,6 +96,11 @@ $Groups = [ordered]@{
     ) }
     pc = @{ Name = '컴퓨터'; Hint = '느림·멈춤'; Symptoms = @(
         @{ Text = '컴퓨터가 느려요 / 자꾸 멈춰요'; Check = { Test-PcSlow } }
+    ) }
+    app = @{ Name = '프로그램'; Hint = '오피스·한글 설치·인증'; Symptoms = @(
+        @{ Text = '엑셀·파워포인트가 인증하라고 떠요 / 편집이 안 돼요'; Check = { Test-OfficeLicense } }
+        @{ Text = '엑셀·파워포인트(오피스)를 설치하고 싶어요'; Check = { Test-OfficeInstall } }
+        @{ Text = '한글이 안 열려요 / 인증하라고 떠요 / 설치하고 싶어요'; Check = { Test-Hangul } }
     ) }
 }
 

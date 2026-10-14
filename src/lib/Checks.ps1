@@ -22,6 +22,9 @@ function Open-Settings([string]$Page) {
     New-Action '설정 창 열기' ([scriptblock]::Create("Start-Process 'ms-settings:$Page'; '설정 창을 열었어요. 위 순서대로 해 보세요.'"))
 }
 
+# 학교 안에서 물어볼 사람 (마이크 채널, 인증 코드·제품 키). config.json의 Contact.
+function Get-Contact { if ($Config.Contact) { $Config.Contact } else { '정보부장님' } }
+
 # 버튼을 눌렀다가 확인 창에서 [아니요]를 고르면 이 문구를 돌려준다. '해 본 것'에 넣지 않는다.
 $script:CancelText = '취소했어요.'
 
@@ -173,7 +176,7 @@ function Test-MicNone {
 }
 
 function Test-MicCross {
-    $contact = if ($Config.MicContact) { $Config.MicContact } else { '정보부장님' }
+    $contact = Get-Contact
     New-Result guide '다른 반과 마이크 채널(주파수)이 겹쳐서 생기는 일이에요. 교실에서 고칠 수는 없어요.' @() @(
         '어느 반 마이크 소리인지 알아봐 주세요. 들리는 목소리나 시간표로 짐작할 수 있어요.',
         "알게 되면 $($contact)께 메신저로 '○○반 마이크 소리가 우리 반에서 들려요'라고 알려 주세요. 두 반 중 한 곳의 채널을 바꾸면 돼요.",
@@ -688,4 +691,96 @@ function Test-NetDown {
     New-Result band '이 PC는 연결돼 있는데 바깥 인터넷이 안 돼요. 학교(층) 전체 문제일 수 있어요.' $facts @(
         '옆 반도 안 되는지 물어보세요. 같이 안 되면 학교 네트워크 문제예요.',
         '밴드에 올려 주세요. 옆 반도 안 되면 그 내용도 같이 적어 주세요.')
+}
+
+# ───────────────────────── 프로그램 (오피스·한글) ─────────────────────────
+# 저장소가 공개라 설치 파일 링크·인증 코드·제품 키는 넣지 않는다. 그건 정보부장님께 묻게 한다.
+
+function Get-OfficeInfo {
+    $c2r = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration' -ErrorAction SilentlyContinue
+    $ids = if ($c2r) { "$($c2r.ProductReleaseIds)" } else { '' }
+    $kind = if ($ids -match 'O365|M365') { 'account' } elseif ($ids -match 'Volume') { 'volume' } elseif ($ids) { 'other' } else { 'none' }
+    $name = switch -Regex ($ids) {
+        'O365|M365'         { 'Microsoft 365 (가입센터 계정으로 인증)'; break }
+        'ProPlus2024Volume' { 'Office 2024 (학교용)'; break }
+        'ProPlus2021Volume' { 'Office 2021 (학교용)'; break }
+        '.'                 { $ids; break }
+        default             { '설치 안 됨' }
+    }
+    $signedIn = @(Get-ChildItem 'HKCU:\Software\Microsoft\Office\16.0\Common\Identity\Identities' -ErrorAction SilentlyContinue).Count -gt 0
+    $facts = @("오피스: $name")
+    if ($kind -eq 'account') { $facts += $(if ($signedIn) { '오피스 로그인: 됨' } else { '오피스 로그인: 안 됨' }) }
+    @{ Kind = $kind; Facts = $facts }
+}
+
+function Get-HangulName {
+    $keys = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    @(Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match '한컴|Hancom' -and $_.DisplayName -match '한글|Hwp|오피스|Office' } |
+        ForEach-Object DisplayName | Select-Object -Unique)
+}
+
+function New-Office365Action {
+    $url = if ($Config.Office365Url) { $Config.Office365Url } else { 'https://o365.sje.go.kr' }
+    New-Action '오피스 365 가입센터 열기' ([scriptblock]::Create("Start-Process '$url'; '가입센터를 열었어요. 위 순서대로 해 보세요.'"))
+}
+
+function Get-Office365Steps {
+    $contact = Get-Contact
+    "아래 [오피스 365 가입센터 열기]를 누르세요.",
+    "계정이 없으면 [교직원 회원가입]을 누르세요. 가입 인증 코드는 $($contact)께 물어보세요. 학교 이름은 직접 적어 주세요.",
+    "가입한 계정으로 [Microsoft 365 로그인] → 왼쪽 아래 [앱] → [Microsoft 365 앱 설치] → [Office 설치]를 누르세요.",
+    '받은 설치 파일을 실행하고, 관리자 확인 창이 뜨면 [예]를 누르세요. 설치가 끝날 때까지 창을 닫지 마세요.',
+    '엑셀을 열고 가입한 계정으로 로그인하면 인증이 끝나요.'
+}
+
+function Test-OfficeLicense {
+    $o = Get-OfficeInfo
+    $contact = Get-Contact
+    switch ($o.Kind) {
+        'none' {
+            return New-Result guide '이 PC에는 오피스(엑셀·파워포인트)가 설치돼 있지 않아요.' $o.Facts @(Get-Office365Steps) @(New-Office365Action)
+        }
+        'account' {
+            return New-Result guide 'Microsoft 365는 가입센터 계정으로 로그인해야 인증돼요.' $o.Facts @(
+                '엑셀을 열고 오른쪽 위 [로그인]을 누르세요.',
+                '오피스 365 가입센터에서 만든 계정으로 로그인하세요. 다른 사람 계정이 보이면 [로그아웃] 후 내 계정으로 다시 로그인하세요.',
+                "계정이 없으면 아래 버튼으로 가입하세요. 가입 인증 코드는 $($contact)께 물어보세요.",
+                '로그인했는데도 인증하라고 뜨면 엑셀을 모두 닫고 다시 열어 보세요. 그래도 안 되면 밴드에 올려 주세요.') @(New-Office365Action)
+        }
+        'volume' {
+            return New-Result guide "학교용 오피스의 인증이 풀렸을 수 있어요. 학교용 인증 방법은 $($contact)께 물어보세요." $o.Facts @(
+                "$($contact)께 '오피스 인증이 풀렸어요'라고 알려 주세요. 학교용 설치 파일과 인증 방법을 안내받을 수 있어요.",
+                '받은 파일은 C 드라이브 바로 아래처럼 영어로만 된 폴더에 압축을 풀어야 해요. 폴더 이름에 한글이 있으면 실패해요.',
+                '배치 파일을 오른쪽 클릭 → [관리자 권한으로 실행]하세요.',
+                "개인 계정으로 쓰고 싶으면 오피스 365 가입센터로 바꿀 수도 있어요. 이때는 지금 오피스를 먼저 지워야 해서 $($contact)께 먼저 물어보세요.")
+        }
+    }
+    New-Result band '오피스 종류를 알아내지 못했어요.' $o.Facts @("$($contact)께 묻거나 밴드에 올려 주세요.")
+}
+
+function Test-OfficeInstall {
+    $o = Get-OfficeInfo
+    if ($o.Kind -ne 'none') {
+        return New-Result ok '이 PC에는 이미 오피스가 설치돼 있어요.' $o.Facts @(
+            '시작 메뉴에서 엑셀·파워포인트를 찾아 열어 보세요.',
+            "인증하라고 뜨면 [엑셀·파워포인트가 인증하라고 떠요]를 눌러 주세요.")
+    }
+    New-Result guide '오피스 365 가입센터에서 직접 설치할 수 있어요.' $o.Facts @(Get-Office365Steps) @(New-Office365Action)
+}
+
+function Test-Hangul {
+    $names = @(Get-HangulName)
+    $contact = Get-Contact
+    $facts = @($(if ($names.Count -gt 0) { "한글: $($names -join ', ')" } else { '한글: 설치 안 됨' }))
+    if ($names.Count -eq 0) {
+        return New-Result guide '이 PC에는 한글이 설치돼 있지 않아요.' $facts @(
+            "한글 설치 파일 주소와 제품 키는 $($contact)께 물어보세요.",
+            '받은 설치 파일을 실행하고, 관리자 확인 창이 뜨면 [예]를 누르세요.',
+            '제품 키를 묻는 칸에 받은 키를 그대로 넣으세요.')
+    }
+    New-Result guide '한글은 설치돼 있어요.' $facts @(
+        '한글 창을 모두 닫고 PC를 다시 시작한 뒤 열어 보세요. 대부분 이걸로 풀려요.',
+        "제품 키(인증)를 다시 넣으라고 뜨면 $($contact)께 제품 키를 물어보세요.",
+        '특정 파일만 안 열리면 그 파일을 USB나 메신저로 다른 PC에서 열어 보세요. 거기서도 안 열리면 파일 문제예요.',
+        '그래도 안 되면 뜨는 오류 창을 사진으로 찍어 밴드에 올려 주세요.') @(New-RestartAction)
 }
