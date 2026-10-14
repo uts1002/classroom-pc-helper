@@ -157,6 +157,95 @@ namespace PcHelper {
 
     public static int Clone()  { return SetDisplayConfig(0, IntPtr.Zero, 0, IntPtr.Zero, 0x80 | 0x2); }
     public static int Extend() { return SetDisplayConfig(0, IntPtr.Zero, 0, IntPtr.Zero, 0x80 | 0x4); }
+
+    // ── 해상도 ──
+    [DllImport("user32.dll", EntryPoint = "QueryDisplayConfig")]
+    static extern int QueryActive(uint flags, ref uint numPath, IntPtr paths, ref uint numMode, IntPtr modes, IntPtr topology);
+    [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(IntPtr packet);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplaySettings(string name, int mode, ref DevMode dm);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int ChangeDisplaySettingsEx(string name, ref DevMode dm, IntPtr hwnd, uint flags, IntPtr param);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct DevMode {
+      [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+      public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+      public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
+      public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+      [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+      public short dmLogPixels;
+      public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency;
+      public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
+    }
+
+    // DisplayConfigGetDeviceInfo 요청 묶음. 머리말(종류·크기·어댑터·대상 번호) 20바이트 뒤에 답이 온다.
+    static IntPtr Packet(int type, int size, IntPtr path, int offset) {
+      IntPtr p = Marshal.AllocHGlobal(size);
+      for (int i = 0; i < size; i++) Marshal.WriteByte(p, i, 0);
+      Marshal.WriteInt32(p, 0, type);
+      Marshal.WriteInt32(p, 4, size);
+      Marshal.WriteInt64(p, 8, Marshal.ReadInt64(path, offset));          // 어댑터 LUID
+      Marshal.WriteInt32(p, 16, Marshal.ReadInt32(path, offset + 8));     // 원본/대상 번호
+      if (DisplayConfigGetDeviceInfo(p) != 0) { Marshal.FreeHGlobal(p); return IntPtr.Zero; }
+      return p;
+    }
+
+    // 켜져 있는 화면마다 지금 해상도와 그 화면이 원하는 해상도(윈도우 '권장')를 알려 준다.
+    public static List<MonitorMode> Monitors() {
+      var list = new List<MonitorMode>();
+      uint np, nm;
+      if (GetDisplayConfigBufferSizes(2, out np, out nm) != 0) return list;
+      IntPtr paths = Marshal.AllocHGlobal((int)(np + 1) * 72);
+      IntPtr modes = Marshal.AllocHGlobal((int)(nm + 1) * 64);
+      try {
+        if (QueryActive(2, ref np, paths, ref nm, modes, IntPtr.Zero) != 0) return list;
+        var sources = new Dictionary<long, int>();
+        for (int i = 0; i < np; i++) {
+          IntPtr path = new IntPtr(paths.ToInt64() + i * 72);
+          var m = new MonitorMode();
+          IntPtr src = Packet(1, 84, path, 0);
+          if (src != IntPtr.Zero) { m.Source = Marshal.PtrToStringUni(new IntPtr(src.ToInt64() + 20)); Marshal.FreeHGlobal(src); }
+          IntPtr tgt = Packet(2, 420, path, 20);
+          if (tgt != IntPtr.Zero) { m.Name = Marshal.PtrToStringUni(new IntPtr(tgt.ToInt64() + 36)); Marshal.FreeHGlobal(tgt); }
+          IntPtr pref = Packet(3, 80, path, 20);
+          if (pref != IntPtr.Zero) { m.BestWidth = Marshal.ReadInt32(pref, 20); m.BestHeight = Marshal.ReadInt32(pref, 24); Marshal.FreeHGlobal(pref); }
+          var dm = new DevMode(); dm.dmSize = (short)Marshal.SizeOf(typeof(DevMode));
+          if (m.Source != null && EnumDisplaySettings(m.Source, -1, ref dm)) { m.Width = dm.dmPelsWidth; m.Height = dm.dmPelsHeight; }
+          long key = Marshal.ReadInt64(path, 0) ^ ((long)Marshal.ReadInt32(path, 8) << 40);
+          int count; sources.TryGetValue(key, out count); sources[key] = count + 1;
+          m.SourceKey = key;
+          list.Add(m);
+        }
+        foreach (var m in list) m.Shared = sources[m.SourceKey] > 1;
+      } finally { Marshal.FreeHGlobal(paths); Marshal.FreeHGlobal(modes); }
+      return list;
+    }
+
+    // 0이면 성공. 바꾸기 전에 그 해상도를 받는지 먼저 시험해 본다.
+    public static int SetResolution(string source, int width, int height) {
+      var dm = new DevMode(); dm.dmSize = (short)Marshal.SizeOf(typeof(DevMode));
+      if (!EnumDisplaySettings(source, -1, ref dm)) return -100;
+      dm.dmPelsWidth = width; dm.dmPelsHeight = height;
+      dm.dmFields = 0x80000 | 0x100000;
+      int test = ChangeDisplaySettingsEx(source, ref dm, IntPtr.Zero, 0x2, IntPtr.Zero);
+      if (test != 0) return test;
+      return ChangeDisplaySettingsEx(source, ref dm, IntPtr.Zero, 0x1, IntPtr.Zero);
+    }
+  }
+
+  public class MonitorMode {
+    public string Name;        // 화면 이름 (모니터가 알려 주는 이름)
+    public string Source;      // \\.\DISPLAY1 같은 윈도우 화면 번호
+    public int Width, Height;            // 지금 해상도
+    public int BestWidth, BestHeight;    // 화면이 원하는 해상도 (윈도우 '권장')
+    public bool Shared;        // 다른 화면과 그림 하나를 나눠 씀 (복제)
+    public long SourceKey;
+  }
+
+  public static class Touch {
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    // 0x80 준비됨, 0x01 내장 터치, 0x02 외장 터치(전자칠판), 0x04·0x08 펜
+    public static int Digitizer() { return GetSystemMetrics(94); }
+    public static int MaxTouches() { return GetSystemMetrics(95); }
   }
 
   // 창을 바탕화면 층에 붙인다. 바탕화면(Progman)을 주인 창으로 지정하면

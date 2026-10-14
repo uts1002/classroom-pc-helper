@@ -3,7 +3,7 @@
 #
 # 실행: powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File PcHelper.ps1
 #   -NoPin        바탕화면에 고정하지 않고 보통 창으로 띄움 (테스트용)
-#   -Open <갈래>  켜자마자 도우미 창을 연다: display | audio | print | net (테스트용)
+#   -Open <갈래>  켜자마자 도우미 창을 연다: display | touch | audio | print | net | pc (테스트용)
 
 param([switch]$NoPin, [string]$Open)
 
@@ -67,22 +67,35 @@ $Groups = [ordered]@{
         @{ Text = 'TV에 내 화면을 똑같이 띄우고 싶어요'; Check = { Test-DisplaySame } }
         @{ Text = '글씨·아이콘이 갑자기 커졌어요 (작아졌어요)'; Check = { Test-DisplayScale } }
         @{ Text = '마우스가 옆 화면으로 안 넘어가요 / 방향이 반대예요'; Check = { Test-DisplayMouse } }
+        @{ Text = '화면이 흐려요 / 글씨가 번져요 / 비율이 이상해요'; Check = { Test-DisplaySharp } }
     ) }
-    audio = @{ Name = '소리'; Hint = '스피커·TV 소리·잡음'; Symptoms = @(
+    touch = @{ Name = '터치'; Hint = '전자칠판 터치'; Symptoms = @(
+        @{ Text = '전자칠판 터치가 안 돼요'; Check = { Test-TouchNone } }
+        @{ Text = '터치하면 다른 화면(내 모니터)이 눌려요'; Check = { Test-TouchMap } }
+        @{ Text = '저절로 눌리거나 화면이 커졌다 작아졌다 해요'; Check = { Test-TouchGhost } }
+        @{ Text = '터치를 끄고 싶어요 / 다시 켜고 싶어요'; Check = { Test-TouchSwitch } }
+    ) }
+    audio = @{ Name = '소리'; Hint = '스피커·TV 소리·마이크'; Symptoms = @(
         @{ Text = '교실 스피커로 소리가 안 나요 (TV로는 나요)'; Check = { Test-AudioTarget -WantTv $false } }
         @{ Text = 'TV(전자칠판)에서 소리가 안 나요'; Check = { Test-AudioTarget -WantTv $true } }
         @{ Text = '소리가 아예 안 나요'; Check = { Test-AudioNone } }
         @{ Text = '지직거리는 잡음, 삐 소리가 나요'; Check = { Test-AudioNoise } }
+        @{ Text = '마이크 소리가 안 나요'; Check = { Test-MicNone } }
+        @{ Text = '다른 반 마이크 소리가 우리 반에서 들려요'; Check = { Test-MicCross } }
     ) }
-    print = @{ Name = '프린터'; Hint = '인쇄·용지 걸림'; Symptoms = @(
+    print = @{ Name = '프린터'; Hint = '인쇄·용지 걸림·스캔'; Symptoms = @(
         @{ Text = '인쇄가 안 돼요'; Check = { Test-PrintFail } }
         @{ Text = '다른 반(엉뚱한) 프린터로 나가요'; Check = { Test-PrintWrong } }
         @{ Text = '종이가 걸렸다고 떠요'; Check = { Test-PrintJam } }
         @{ Text = '쓰려는 프린터가 목록에 없어요'; Check = { Test-PrintMissing } }
+        @{ Text = '스캔한 파일이 PC로 안 들어와요 / 스캔 연결이 필요해요'; Check = { Test-ScanFolder } }
     ) }
     net = @{ Name = '인터넷'; Hint = '인터넷·사이트 접속'; Symptoms = @(
         @{ Text = '인터넷이 안 돼요'; Check = { Test-NetDown } }
         @{ Text = '특정 사이트·업무포털만 안 열려요'; Check = { Test-NetDown } }
+    ) }
+    pc = @{ Name = '컴퓨터'; Hint = '느림·멈춤'; Symptoms = @(
+        @{ Text = '컴퓨터가 느려요 / 자꾸 멈춰요'; Check = { Test-PcSlow } }
     ) }
 }
 
@@ -339,7 +352,7 @@ function Invoke-Fix($Action) {
     Update-Ui
     try {
         $msg = (& $Action.Run | Select-Object -Last 1)
-        $script:State.Done += $Action.Label
+        if ($msg -ne $script:CancelText) { $script:State.Done += $Action.Label }
     } catch {
         $msg = "고치지 못했어요: $($_.Exception.Message)"
         $script:State.Done += "$($Action.Label) (실패)"
@@ -349,6 +362,41 @@ function Invoke-Fix($Action) {
     try { $script:State.Result = & $script:State.Symptom.Check } catch { }
     $script:State.Notice = $msg
     Show-Result
+}
+
+# 수리 버튼이 PC를 크게 바꾸기 전에 묻는다.
+function Confirm-Ask([string]$Message) {
+    [System.Windows.MessageBox]::Show($script:Win, $Message, $Config.AppName, 'YesNo', 'Question') -eq 'Yes'
+}
+
+# 화면 설정을 바꾼 뒤 잘 보이는지 묻는다. 화면이 안 나와서 못 누르면 시간이 지나 $false.
+function Confirm-Keep([int]$Seconds = 15) {
+    $d = New-Object System.Windows.Window
+    $d.Title = $Config.AppName; $d.Width = 400; $d.SizeToContent = 'Height'; $d.ResizeMode = 'NoResize'
+    $d.WindowStartupLocation = 'CenterOwner'; $d.Owner = $script:Win; $d.Topmost = $true; $d.FontFamily = $FontFamily
+    $d.Resources.MergedDictionaries.Add($Styles)
+    $p = New-Object System.Windows.Controls.StackPanel
+    $p.Margin = New-Object System.Windows.Thickness 24
+    [void]$p.Children.Add((New-Text '화면이 잘 보이나요?' 18 -Bold -Bottom 6))
+    $count = New-Text '' 14 $Colors.Sub -Bottom 14
+    [void]$p.Children.Add($count)
+    $keep = New-Btn '네, 이대로 쓸게요' 'Primary' $null { $d.DialogResult = $true } 6
+    $back = New-Btn '원래대로 되돌리기' 'Soft' $null { $d.DialogResult = $false } 0
+    [void]$p.Children.Add($keep); [void]$p.Children.Add($back)
+    $d.Content = $p
+    $left = @{ Seconds = $Seconds }
+    $count.Text = "$($Seconds)초 뒤에 원래대로 되돌려요."
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromSeconds(1)
+    $timer.Add_Tick({
+        $left.Seconds--
+        $count.Text = "$($left.Seconds)초 뒤에 원래대로 되돌려요."
+        if ($left.Seconds -le 0) { $timer.Stop(); $d.DialogResult = $false }
+    }.GetNewClosure())
+    $timer.Start()
+    $result = $d.ShowDialog()
+    $timer.Stop()
+    [bool]$result
 }
 
 # ───────────────────────── 밴드로 보내기 ─────────────────────────
