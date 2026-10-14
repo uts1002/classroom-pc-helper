@@ -11,8 +11,10 @@ $ErrorActionPreference = 'Continue'
 $AppDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # 같은 사용자로 두 번 켜지지 않게 한다 (시작 프로그램 + 바탕화면 바로가기).
+# 이미 켜져 있으면 그쪽에 "패널 보여 줘" 신호만 보내고 끝난다 (숨겨 둔 패널을 바로가기로 다시 꺼내는 용도).
 $mutex = New-Object System.Threading.Mutex($false, "Local\ClassroomPcHelper")
-if (-not $mutex.WaitOne(0)) { return }
+$showSignal = New-Object System.Threading.EventWaitHandle($false, 'AutoReset', 'Local\ClassroomPcHelper-Show')
+if (-not $mutex.WaitOne(0)) { [void]$showSignal.Set(); return }
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 . (Join-Path $AppDir 'lib\Native.ps1')
@@ -40,11 +42,11 @@ $app.Add_DispatcherUnhandledException({
 $SettingsPath = Join-Path $env:APPDATA 'ClassroomPcHelper\settings.json'
 
 function Get-Settings {
-    $s = @{ RoomName = ''; Left = $null; Top = $null }
+    $s = @{ RoomName = ''; Left = $null; Top = $null; Hidden = $false }
     if (Test-Path $SettingsPath) {
         try {
             $j = Get-Content $SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            foreach ($k in 'RoomName', 'Left', 'Top') { if ($null -ne $j.$k) { $s[$k] = $j.$k } }
+            foreach ($k in 'RoomName', 'Left', 'Top', 'Hidden') { if ($null -ne $j.$k) { $s[$k] = $j.$k } }
         } catch { }
     }
     $s
@@ -169,6 +171,30 @@ $FontFamily = New-Object System.Windows.Media.FontFamily 'Pretendard, Malgun Got
 
 function Brush([string]$hex) { (New-Object System.Windows.Media.BrushConverter).ConvertFromString($hex) }
 
+# 프로그램 아이콘: 파란 바탕에 흰 모니터. 파일 없이 그려서 창·알림 영역에 같이 쓴다.
+function New-AppIcon([int]$Size = 32) {
+    Add-Type -AssemblyName System.Drawing
+    $bmp = New-Object System.Drawing.Bitmap $Size, $Size
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = 'AntiAlias'
+    $u = $Size / 32
+    $bg = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $r = 8 * $u; $w = 30 * $u
+    $bg.AddArc(1 * $u, 1 * $u, $r, $r, 180, 90); $bg.AddArc(1 * $u + $w - $r, 1 * $u, $r, $r, 270, 90)
+    $bg.AddArc(1 * $u + $w - $r, 1 * $u + $w - $r, $r, $r, 0, 90); $bg.AddArc(1 * $u, 1 * $u + $w - $r, $r, $r, 90, 90)
+    $bg.CloseFigure()
+    $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($Colors.Primary))), $bg)
+    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), (2.4 * $u)
+    $g.DrawRectangle($pen, 7 * $u, 8 * $u, 18 * $u, 12 * $u)
+    $g.DrawLine($pen, 16 * $u, 20 * $u, 16 * $u, 24 * $u)
+    $g.DrawLine($pen, 11 * $u, 24.5 * $u, 21 * $u, 24.5 * $u)
+    $g.Dispose()
+    [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+}
+$AppIcon = New-AppIcon 32
+$AppIconImage = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon($AppIcon.Handle, [System.Windows.Int32Rect]::Empty,
+    [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
+
 function New-Text {
     param([string]$Text, [double]$Size = 15, [string]$Color = $Colors.Text, [switch]$Bold, [double]$Bottom = 0)
     $t = New-Object System.Windows.Controls.TextBlock
@@ -220,7 +246,7 @@ function Show-Helper([string]$GroupKey) {
     $script:State = @{ Group = $GroupKey; Symptom = $null; Result = $null; Done = @(); Notice = '' }
     if (-not $script:Win) {
         $w = New-Object System.Windows.Window
-        $w.Title = $Config.AppName
+        $w.Title = $Config.AppName; $w.Icon = $AppIconImage
         $w.Width = 520; $w.Height = 680; $w.MinWidth = 420; $w.MinHeight = 480
         # TV 쪽이 아니라 주 모니터(선생님 화면) 가운데에 띄운다.
         $wa = [System.Windows.SystemParameters]::WorkArea
@@ -378,7 +404,7 @@ function Confirm-Ask([string]$Message) {
 function Confirm-Keep([int]$Seconds = 15) {
     $d = New-Object System.Windows.Window
     $d.Title = $Config.AppName; $d.Width = 400; $d.SizeToContent = 'Height'; $d.ResizeMode = 'NoResize'
-    $d.WindowStartupLocation = 'CenterOwner'; $d.Owner = $script:Win; $d.Topmost = $true; $d.FontFamily = $FontFamily
+    $d.WindowStartupLocation = 'CenterOwner'; $d.Owner = $script:Win; $d.Topmost = $true; $d.FontFamily = $FontFamily; $d.Icon = $AppIconImage
     $d.Resources.MergedDictionaries.Add($Styles)
     $p = New-Object System.Windows.Controls.StackPanel
     $p.Margin = New-Object System.Windows.Thickness 24
@@ -409,7 +435,10 @@ function Confirm-Keep([int]$Seconds = 15) {
 function Read-RoomName {
     $d = New-Object System.Windows.Window
     $d.Title = $Config.AppName; $d.Width = 380; $d.SizeToContent = 'Height'; $d.ResizeMode = 'NoResize'
-    $d.WindowStartupLocation = 'CenterOwner'; $d.Owner = $script:Win; $d.FontFamily = $FontFamily
+    # 패널 메뉴에서 부르면 도우미 창이 없거나 숨어 있다. 그때는 주 모니터 가운데에 띄운다.
+    if ($script:Win -and $script:Win.IsVisible) { $d.WindowStartupLocation = 'CenterOwner'; $d.Owner = $script:Win }
+    else { $d.WindowStartupLocation = 'CenterScreen' }
+    $d.Topmost = $true; $d.FontFamily = $FontFamily; $d.Icon = $AppIconImage
     $d.Resources.MergedDictionaries.Add($Styles)
     $p = New-Object System.Windows.Controls.StackPanel
     $p.Margin = New-Object System.Windows.Thickness 24
@@ -495,14 +524,63 @@ foreach ($key in $Groups.Keys) {
 }
 $panel.Content = $stack
 
+function Set-RoomName {
+    $name = Read-RoomName
+    if (-not $name) { return }
+    $script:Settings.RoomName = $name
+    Save-Settings
+    $tray.ShowBalloonTip(3000, $Config.AppName, "반 이름을 '$name'(으)로 정했어요.", 'Info')
+}
+
+# 패널을 숨기면 알림 영역(작업 표시줄 오른쪽 아래) 아이콘으로만 남는다.
+function Set-PanelHidden([bool]$Hidden) {
+    $script:Settings.Hidden = $Hidden
+    Save-Settings
+    if ($Hidden) {
+        $panel.Hide()
+        $tray.ShowBalloonTip(5000, $Config.AppName, "작업 표시줄 오른쪽 아래 아이콘으로 들어갔어요. 아이콘을 누르면 다시 나와요. (아이콘이 안 보이면 ^ 를 누르세요)", 'Info')
+    } else {
+        $panel.Show()
+        if (-not $NoPin) { [PcHelper.Desk]::SendToBack((New-Object System.Windows.Interop.WindowInteropHelper $panel).Handle) }
+    }
+}
+
 $menu = New-Object System.Windows.Controls.ContextMenu
+$hide = New-Object System.Windows.Controls.MenuItem; $hide.Header = '작은 아이콘으로 숨기기'
+$hide.Add_Click({ Set-PanelHidden $true })
 $reset = New-Object System.Windows.Controls.MenuItem; $reset.Header = '반 이름 다시 정하기'
-$reset.Add_Click({ $script:Settings.RoomName = ''; Save-Settings })
+$reset.Add_Click({ Set-RoomName })
 $quit = New-Object System.Windows.Controls.MenuItem; $quit.Header = 'PC 도우미 끄기'
 $quit.Add_Click({ [System.Windows.Application]::Current.Shutdown() })
 $version = New-Object System.Windows.Controls.MenuItem; $version.Header = "버전 $(Get-AppVersion $AppDir)"; $version.IsEnabled = $false
-[void]$menu.Items.Add($reset); [void]$menu.Items.Add($quit); [void]$menu.Items.Add($version)
+foreach ($item in $hide, $reset, $quit, $version) { [void]$menu.Items.Add($item) }
 $panel.ContextMenu = $menu
+
+# ───────────────────────── 알림 영역 아이콘 ─────────────────────────
+# 왼쪽 클릭: 패널 보이기/숨기기. 오른쪽 클릭: 갈래 바로 열기와 메뉴.
+
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$tray = New-Object System.Windows.Forms.NotifyIcon
+$tray.Icon = $AppIcon
+$tray.Text = $Config.AppName
+$trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
+$trayMenu.Font = New-Object System.Drawing.Font 'Malgun Gothic', 10
+foreach ($key in $Groups.Keys) {
+    $item = $trayMenu.Items.Add("$($Groups[$key].Name) 문제")
+    $item.Tag = $key
+    $item.Add_Click({ param($s) Show-Helper $s.Tag })
+}
+[void]$trayMenu.Items.Add('-')
+$trayToggle = $trayMenu.Items.Add('패널 보이기')
+$trayToggle.Add_Click({ Set-PanelHidden (-not $script:Settings.Hidden) })
+[void]$trayMenu.Items.Add('반 이름 다시 정하기').Add_Click({ Set-RoomName })
+[void]$trayMenu.Items.Add('PC 도우미 끄기').Add_Click({ [System.Windows.Application]::Current.Shutdown() })
+$trayMenu.Add_Opening({ $trayToggle.Text = $(if ($script:Settings.Hidden) { '패널 보이기' } else { '패널 숨기기' }) })
+$tray.ContextMenuStrip = $trayMenu
+$tray.Add_MouseClick({ param($s, $e) if ($e.Button -eq 'Left') { Set-PanelHidden (-not $script:Settings.Hidden) } })
+$tray.Visible = $true
+# 끌 때 아이콘을 치우지 않으면 마우스를 올릴 때까지 유령 아이콘이 남는다.
+$app.Add_Exit({ $tray.Visible = $false; $tray.Dispose() })
 
 $title.Add_MouseLeftButtonDown({
     $panel.DragMove()
@@ -549,7 +627,12 @@ $updateTimer.Add_Tick({
 })
 $updateTimer.Start()
 
-$panel.Show()
+$showTimer = New-Object System.Windows.Threading.DispatcherTimer
+$showTimer.Interval = [TimeSpan]::FromSeconds(1)
+$showTimer.Add_Tick({ if ($showSignal.WaitOne(0)) { Set-PanelHidden $false } })
+$showTimer.Start()
+
+if (-not $script:Settings.Hidden) { $panel.Show() }
 if ($Open -and $Groups.Contains($Open)) { Show-Helper $Open }
 [void]$app.Run()
 try { $mutex.ReleaseMutex() } catch { }
