@@ -62,6 +62,44 @@ function Update-ShortcutIcon([string]$AppDir) {
     } catch { }
 }
 
+# 윈도우 '설정 > 앱 > 설치된 앱' 목록에 올린다 (이 사용자에게만, 관리자 권한 필요 없음).
+# 설치할 때와 켤 때마다 불러서 버전을 맞춘다. 저장소에서 바로 실행할 때는 올리지 않는다.
+function Register-AppEntry([string]$AppDir) {
+    if ($AppDir -notlike "$env:LOCALAPPDATA\ClassroomPcHelper\*") { return }
+    $uninstall = Join-Path $AppDir 'uninstall.ps1'
+    if (-not (Test-Path $uninstall)) { return }
+    try {
+        $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ClassroomPcHelper'
+        if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+        $sizeKb = [int]((Get-ChildItem $AppDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1KB)
+        $values = @{
+            DisplayName = 'PC 도우미'
+            DisplayVersion = Get-AppVersion $AppDir
+            DisplayIcon = Join-Path $AppDir 'icon.ico'
+            InstallLocation = $AppDir
+            UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstall`""
+        }
+        foreach ($name in $values.Keys) { Set-ItemProperty -Path $key -Name $name -Value $values[$name] }
+        foreach ($name in 'NoModify', 'NoRepair') { Set-ItemProperty -Path $key -Name $name -Value 1 -Type DWord }
+        Set-ItemProperty -Path $key -Name EstimatedSize -Value $sizeKb -Type DWord
+    } catch { }
+}
+
+# 윈도우 켤 때 자동 실행 = 시작 프로그램 폴더의 바로가기. 설치할 때 기본으로 만들고, 알림 영역 메뉴에서 끄고 켠다.
+function Get-StartupShortcutPath { Join-Path ([Environment]::GetFolderPath('Startup')) 'PC 도우미.lnk' }
+
+function Set-AutoStart([string]$AppDir, [bool]$On) {
+    $path = Get-StartupShortcutPath
+    if (-not $On) { if (Test-Path $path) { Remove-Item $path -Force }; return }
+    $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
+    $lnk.TargetPath = Join-Path $env:WINDIR 'System32\conhost.exe'
+    $lnk.Arguments = Get-LaunchArguments $AppDir
+    $lnk.WorkingDirectory = $env:LOCALAPPDATA
+    $lnk.IconLocation = "$(Join-Path $AppDir 'icon.ico'),0"
+    $lnk.Description = '교실 PC 문제 점검·수리 도우미'
+    $lnk.Save()
+}
+
 function Get-LaunchArguments([string]$AppDir) {
     "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File `"$(Join-Path $AppDir 'PcHelper.ps1')`""
 }

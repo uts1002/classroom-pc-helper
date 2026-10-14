@@ -183,6 +183,7 @@ $IconPath = Join-Path $AppDir 'icon.ico'
 $AppIcon = New-Object System.Drawing.Icon $IconPath, ([System.Windows.Forms.SystemInformation]::SmallIconSize)
 $AppIconImage = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$IconPath)
 Update-ShortcutIcon $AppDir
+Register-AppEntry $AppDir
 
 function New-Text {
     param([string]$Text, [double]$Size = 15, [string]$Color = $Colors.Text, [switch]$Bold, [double]$Bottom = 0)
@@ -762,8 +763,21 @@ foreach ($key in $Groups.Keys) {
 $trayToggle = $trayMenu.Items.Add('패널 보이기')
 $trayToggle.Add_Click({ Set-PanelHidden (-not $script:Settings.Hidden) })
 [void]$trayMenu.Items.Add('반 이름 다시 정하기').Add_Click({ Set-RoomName })
+# 저장소에서 바로 실행할 때는 바로가기가 엉뚱한 곳을 가리키게 되므로 설치본에서만 바꿀 수 있다.
+$trayAuto = New-Object System.Windows.Forms.ToolStripMenuItem '윈도우 켤 때 자동 실행'
+$trayAuto.Enabled = $AppDir -like "$env:LOCALAPPDATA\ClassroomPcHelper\*"
+$trayAuto.Add_Click({
+    $on = -not (Test-Path (Get-StartupShortcutPath))
+    Set-AutoStart $AppDir $on
+    $msg = if ($on) { '이제 윈도우를 켜면 PC 도우미가 자동으로 켜져요.' } else { '이제 윈도우를 켜도 자동으로 켜지지 않아요. 바탕화면 바로가기로 켤 수 있어요.' }
+    $tray.ShowBalloonTip(4000, $Config.AppName, $msg, 'Info')
+})
+[void]$trayMenu.Items.Add($trayAuto)
 [void]$trayMenu.Items.Add('PC 도우미 끄기').Add_Click({ [System.Windows.Application]::Current.Shutdown() })
-$trayMenu.Add_Opening({ $trayToggle.Text = $(if ($script:Settings.Hidden) { '패널 보이기' } else { '패널 숨기기' }) })
+$trayMenu.Add_Opening({
+    $trayToggle.Text = $(if ($script:Settings.Hidden) { '패널 보이기' } else { '패널 숨기기' })
+    $trayAuto.Checked = Test-Path (Get-StartupShortcutPath)
+})
 $tray.ContextMenuStrip = $trayMenu
 $tray.Add_MouseClick({ param($s, $e) if ($e.Button -eq 'Left') { Set-PanelHidden (-not $script:Settings.Hidden) } })
 $tray.Visible = $true

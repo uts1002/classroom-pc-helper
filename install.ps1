@@ -4,7 +4,8 @@
 #     - 없으면 GitHub 최신 릴리즈의 app.zip 을 받아서 (PcHelper-Setup.cmd 로 설치)
 #  2. 로그인할 때 자동으로 켜지게 시작 프로그램에 등록
 #  3. 바탕화면에 바로가기 (실수로 껐을 때 다시 켜는 용도)
-#  4. 바로 실행. 이후 새 버전은 프로그램이 알아서 받는다.
+#  4. 윈도우 '설치된 앱' 목록에 등록 (거기서 [제거]로 지울 수 있게)
+#  5. 바로 실행. 이후 새 버전은 프로그램이 알아서 받는다.
 
 param([string]$Repo = 'uts1002/classroom-pc-helper')
 
@@ -39,16 +40,20 @@ $script = Join-Path $dest 'PcHelper.ps1'
 $target = Join-Path $env:WINDIR 'System32\conhost.exe'
 $arguments = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File `"$script`""
 
-$shell = New-Object -ComObject WScript.Shell
-foreach ($folder in [Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('Desktop')) {
-    $lnk = $shell.CreateShortcut((Join-Path $folder 'PC 도우미.lnk'))
-    $lnk.TargetPath = $target
-    $lnk.Arguments = $arguments
-    $lnk.WorkingDirectory = $env:LOCALAPPDATA
-    $lnk.IconLocation = "$(Join-Path $dest 'icon.ico'),0"
-    $lnk.Description = '교실 PC 문제 점검·수리 도우미'
-    $lnk.Save()
-}
+. (Join-Path $dest 'lib\Update.ps1')
+
+# 윈도우 켤 때 자동 실행(기본으로 켬, 알림 영역 메뉴에서 끌 수 있음) + 바탕화면 바로가기
+Set-AutoStart $dest $true
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'PC 도우미.lnk'))
+$lnk.TargetPath = $target
+$lnk.Arguments = $arguments
+$lnk.WorkingDirectory = $env:LOCALAPPDATA
+$lnk.IconLocation = "$(Join-Path $dest 'icon.ico'),0"
+$lnk.Description = '교실 PC 문제 점검·수리 도우미'
+$lnk.Save()
+
+# 윈도우 '설치된 앱' 목록에 올려서 거기서 지울 수 있게 한다.
+Register-AppEntry $dest
 
 Start-Process $target $arguments
 $version = (Get-Content (Join-Path $dest 'version.txt') -Raw).Trim()
