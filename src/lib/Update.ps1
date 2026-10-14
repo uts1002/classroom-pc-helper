@@ -45,6 +45,23 @@ function Install-Update([string]$AppDir, [string]$Repo) {
     }
 }
 
+# 예전 버전이 만든 바로가기(톱니바퀴 아이콘)를 앱 아이콘으로 바꾼다. 이 설치본을 가리키는 바로가기만 건드린다.
+function Update-ShortcutIcon([string]$AppDir) {
+    $icon = Join-Path $AppDir 'icon.ico'
+    if (-not (Test-Path $icon)) { return }
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($folder in [Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('Desktop')) {
+            $path = Join-Path $folder 'PC 도우미.lnk'
+            if (-not (Test-Path $path)) { continue }
+            $lnk = $shell.CreateShortcut($path)
+            if ($lnk.Arguments -notlike "*$AppDir*" -or $lnk.IconLocation -like "$icon*") { continue }
+            $lnk.IconLocation = "$icon,0"
+            $lnk.Save()
+        }
+    } catch { }
+}
+
 function Get-LaunchArguments([string]$AppDir) {
     "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File `"$(Join-Path $AppDir 'PcHelper.ps1')`""
 }

@@ -16,7 +16,7 @@ $mutex = New-Object System.Threading.Mutex($false, "Local\ClassroomPcHelper")
 $showSignal = New-Object System.Threading.EventWaitHandle($false, 'AutoReset', 'Local\ClassroomPcHelper-Show')
 if (-not $mutex.WaitOne(0)) { [void]$showSignal.Set(); return }
 
-Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, System.Drawing
 . (Join-Path $AppDir 'lib\Native.ps1')
 . (Join-Path $AppDir 'lib\Checks.ps1')
 . (Join-Path $AppDir 'lib\Update.ps1')
@@ -171,29 +171,11 @@ $FontFamily = New-Object System.Windows.Media.FontFamily 'Pretendard, Malgun Got
 
 function Brush([string]$hex) { (New-Object System.Windows.Media.BrushConverter).ConvertFromString($hex) }
 
-# 프로그램 아이콘: 파란 바탕에 흰 모니터. 파일 없이 그려서 창·알림 영역에 같이 쓴다.
-function New-AppIcon([int]$Size = 32) {
-    Add-Type -AssemblyName System.Drawing
-    $bmp = New-Object System.Drawing.Bitmap $Size, $Size
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = 'AntiAlias'
-    $u = $Size / 32
-    $bg = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $r = 8 * $u; $w = 30 * $u
-    $bg.AddArc(1 * $u, 1 * $u, $r, $r, 180, 90); $bg.AddArc(1 * $u + $w - $r, 1 * $u, $r, $r, 270, 90)
-    $bg.AddArc(1 * $u + $w - $r, 1 * $u + $w - $r, $r, $r, 0, 90); $bg.AddArc(1 * $u, 1 * $u + $w - $r, $r, $r, 90, 90)
-    $bg.CloseFigure()
-    $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($Colors.Primary))), $bg)
-    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), (2.4 * $u)
-    $g.DrawRectangle($pen, 7 * $u, 8 * $u, 18 * $u, 12 * $u)
-    $g.DrawLine($pen, 16 * $u, 20 * $u, 16 * $u, 24 * $u)
-    $g.DrawLine($pen, 11 * $u, 24.5 * $u, 21 * $u, 24.5 * $u)
-    $g.Dispose()
-    [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
-}
-$AppIcon = New-AppIcon 32
-$AppIconImage = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon($AppIcon.Handle, [System.Windows.Int32Rect]::Empty,
-    [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
+# 프로그램 아이콘 (파란 바탕에 체크한 모니터). 창·알림 영역·바로가기에 같이 쓴다.
+$IconPath = Join-Path $AppDir 'icon.ico'
+$AppIcon = New-Object System.Drawing.Icon $IconPath, ([System.Windows.Forms.SystemInformation]::SmallIconSize)
+$AppIconImage = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$IconPath)
+Update-ShortcutIcon $AppDir
 
 function New-Text {
     param([string]$Text, [double]$Size = 15, [string]$Color = $Colors.Text, [switch]$Bold, [double]$Bottom = 0)

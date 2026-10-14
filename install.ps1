@@ -45,7 +45,7 @@ foreach ($folder in [Environment]::GetFolderPath('Startup'), [Environment]::GetF
     $lnk.TargetPath = $target
     $lnk.Arguments = $arguments
     $lnk.WorkingDirectory = $env:LOCALAPPDATA
-    $lnk.IconLocation = "$env:WINDIR\System32\imageres.dll,109"
+    $lnk.IconLocation = "$(Join-Path $dest 'icon.ico'),0"
     $lnk.Description = '교실 PC 문제 점검·수리 도우미'
     $lnk.Save()
 }
