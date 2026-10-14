@@ -274,6 +274,13 @@ namespace PcHelper {
     public static void SendToBack(IntPtr h) {
       SetWindowPos(h, new IntPtr(1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10);        // 맨 아래, 크기·위치 유지, 활성화 안 함
     }
+
+    // 윈도우 11에서 테두리 없는 창도 둥근 모서리로 그린다. 윈도우 10에서는 아무 일도 안 한다.
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int value, int size);
+    public static void Round(IntPtr h) {
+      int round = 2;
+      DwmSetWindowAttribute(h, 33, ref round, 4);
+    }
   }
 }
 '@
