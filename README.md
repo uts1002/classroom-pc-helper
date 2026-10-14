@@ -23,24 +23,42 @@
 
 ## 설치 (학교 PC, 선생님 계정으로)
 
-1. 이 폴더를 학교 PC에 복사한다.
-2. `설치.cmd`를 더블클릭한다.
-   - `%LOCALAPPDATA%\ClassroomPcHelper\app`에 복사되고, 로그인할 때마다 자동으로 켜진다.
+1. [최신 릴리즈](https://github.com/uts1002/classroom-pc-helper/releases/latest)에서 `PcHelper-Setup.cmd` 하나만 받는다.
+2. 더블클릭한다. ("Windows의 PC 보호" 창이 뜨면 [추가 정보] → [실행])
+   - 최신 버전을 받아 `%LOCALAPPDATA%\ClassroomPcHelper\app`에 설치하고, 로그인할 때마다 자동으로 켜진다.
    - 바탕화면에 `PC 도우미` 바로가기도 생긴다 (실수로 껐을 때 다시 켜는 용도).
 3. 지우려면 PowerShell에서 `uninstall.ps1`을 실행한다.
 
 한 PC를 여러 계정이 쓰면(돌봄 겸용 교실 등) 계정마다 한 번씩 설치한다.
 
+## 자동 업데이트
+
+- 설치된 PC는 켜고 30초 뒤, 그 뒤로 6시간마다 최신 릴리즈의 `version.txt`를 확인한다.
+- 새 버전이면 `app.zip`을 받아 덮어쓰고 스스로 다시 켠다. 도우미 창을 쓰는 중이면 다음 확인으로 미룬다.
+- 인터넷이 안 되거나 GitHub가 막혀 있으면 조용히 넘어간다.
+- 저장소에서 직접 실행할 때(`src/version.txt`가 `0.0.0-dev`)는 업데이트하지 않는다.
+
+## 새 버전 내보내기 (개발자)
+
+```powershell
+.\release.ps1 0.2.0 "터치 갈래 추가"
+```
+
+커밋된 상태에서 태그를 올리면 GitHub Actions(`.github/workflows/release.yml`)가 릴리즈를 만든다.
+릴리즈 파일: `app.zip`, `version.txt`, `install.ps1`, `PcHelper-Setup.cmd`. 버전 번호는 태그에서 정해진다.
+
+이 저장소에 쓰기 권한이 있는 사람이 모든 설치 PC의 코드를 바꿀 수 있다. GitHub 계정 2단계 인증을 켜 둔다.
+
 ## 쓰는 법
 
 - 패널의 [화면]·[소리]·[프린터]·[인터넷]을 누른다.
 - 패널 제목(PC 도우미)을 끌면 위치를 옮길 수 있다. 위치는 기억한다.
-- 패널을 오른쪽 클릭하면 `반 이름 다시 정하기`, `PC 도우미 끄기`가 있다.
+- 패널을 오른쪽 클릭하면 `반 이름 다시 정하기`, `PC 도우미 끄기`, 버전이 있다.
 - 반 이름은 처음 밴드로 보낼 때 한 번 묻고 `%APPDATA%\ClassroomPcHelper\settings.json`에 저장한다.
 
 ## 다른 학교에서 쓰려면
 
-`src/config.json`의 `BandName`, `BandUrl`만 바꾸면 된다.
+저장소를 포크해서 `src/config.json`의 `BandName`, `BandUrl`, `UpdateRepo`와 `install.ps1`·`PcHelper-Setup.cmd`의 저장소 주소를 바꾼다.
 
 ## 구조
 
@@ -48,8 +66,11 @@
 src/PcHelper.ps1     바탕화면 패널 + 도우미 창 + 증상 목록 + 밴드 글 만들기
 src/lib/Checks.ps1   증상별 점검(읽기만)과 판단, 수리 버튼 정의
 src/lib/Native.ps1   윈도우 기본 기능 호출 (소리 장치, 화면 복제/확장, 바탕화면 고정)
-src/config.json      밴드 주소
-install.ps1 / uninstall.ps1 / 설치.cmd
+src/lib/Update.ps1   자동 업데이트
+src/config.json      밴드 주소, 업데이트 저장소
+src/version.txt      버전 (릴리즈 때 태그로 채워짐)
+PcHelper-Setup.cmd   배포용 설치 파일 (최신 릴리즈를 받아 install.ps1 실행)
+install.ps1 / uninstall.ps1 / release.ps1
 ```
 
 윈도우 11에 기본으로 들어 있는 PowerShell 5.1과 WPF만 쓴다. 따로 설치할 프로그램이 없다.

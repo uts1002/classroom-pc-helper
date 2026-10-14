@@ -17,6 +17,7 @@ if (-not $mutex.WaitOne(0)) { return }
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 . (Join-Path $AppDir 'lib\Native.ps1')
 . (Join-Path $AppDir 'lib\Checks.ps1')
+. (Join-Path $AppDir 'lib\Update.ps1')
 
 $Config = Get-Content (Join-Path $AppDir 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 
@@ -446,7 +447,8 @@ $reset = New-Object System.Windows.Controls.MenuItem; $reset.Header = '반 이�
 $reset.Add_Click({ $script:Settings.RoomName = ''; Save-Settings })
 $quit = New-Object System.Windows.Controls.MenuItem; $quit.Header = 'PC 도우미 끄기'
 $quit.Add_Click({ [System.Windows.Application]::Current.Shutdown() })
-[void]$menu.Items.Add($reset); [void]$menu.Items.Add($quit)
+$version = New-Object System.Windows.Controls.MenuItem; $version.Header = "버전 $(Get-AppVersion $AppDir)"; $version.IsEnabled = $false
+[void]$menu.Items.Add($reset); [void]$menu.Items.Add($quit); [void]$menu.Items.Add($version)
 $panel.ContextMenu = $menu
 
 $title.Add_MouseLeftButtonDown({
@@ -478,7 +480,23 @@ if (-not $NoPin) {
     $panel.Add_Deactivated({ [PcHelper.Desk]::SendToBack((New-Object System.Windows.Interop.WindowInteropHelper $panel).Handle) })
 }
 
+# 자동 업데이트: 켜고 30초 뒤 한 번, 그 뒤로 6시간마다 확인한다.
+# 도우미 창을 쓰는 중이면 다음 확인으로 미룬다. 새 버전을 깔았으면 스스로 다시 켠다.
+$updateTimer = New-Object System.Windows.Threading.DispatcherTimer
+$updateTimer.Interval = [TimeSpan]::FromSeconds(30)
+$updateTimer.Add_Tick({
+    $updateTimer.Interval = [TimeSpan]::FromHours(6)
+    if ($script:Win -and $script:Win.IsVisible) { return }
+    if (Install-Update $AppDir $Config.UpdateRepo) {
+        $updateTimer.Stop()
+        $mutex.ReleaseMutex()
+        Start-Process (Join-Path $env:WINDIR 'System32\conhost.exe') (Get-LaunchArguments $AppDir)
+        [System.Windows.Application]::Current.Shutdown()
+    }
+})
+$updateTimer.Start()
+
 $panel.Show()
 if ($Open -and $Groups.Contains($Open)) { Show-Helper $Open }
 [void]$app.Run()
-$mutex.ReleaseMutex()
+try { $mutex.ReleaseMutex() } catch { }
