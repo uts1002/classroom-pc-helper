@@ -18,5 +18,21 @@ Start-Sleep -Milliseconds 500
 $app = Join-Path $env:LOCALAPPDATA 'ClassroomPcHelper'
 if (Test-Path $app) { Remove-Item $app -Recurse -Force -ErrorAction SilentlyContinue }
 
+# 설정 창 뒤에 숨으면 지워진 줄 모르므로 맨 앞에 띄운다.
 Add-Type -AssemblyName PresentationFramework
-[void][System.Windows.MessageBox]::Show('PC 도우미를 지웠어요.', 'PC 도우미')
+$w = New-Object System.Windows.Window
+$w.Title = 'PC 도우미'; $w.Topmost = $true; $w.SizeToContent = 'WidthAndHeight'; $w.ResizeMode = 'NoResize'
+$w.WindowStartupLocation = 'CenterScreen'; $w.FontFamily = 'Malgun Gothic'
+$p = New-Object System.Windows.Controls.StackPanel
+$p.Margin = New-Object System.Windows.Thickness 28, 24, 28, 20
+$t = New-Object System.Windows.Controls.TextBlock
+$t.Text = 'PC 도우미를 지웠어요.'; $t.FontSize = 16
+$ok = New-Object System.Windows.Controls.Button
+$ok.Content = '확인'; $ok.Width = 96; $ok.Padding = New-Object System.Windows.Thickness 0, 6, 0, 6
+$ok.Margin = New-Object System.Windows.Thickness 0, 18, 0, 0; $ok.HorizontalAlignment = 'Right'
+$ok.IsDefault = $true; $ok.IsCancel = $true
+$ok.Add_Click({ $w.Close() })
+[void]$p.Children.Add($t); [void]$p.Children.Add($ok)
+$w.Content = $p
+$w.Add_ContentRendered({ $w.Activate() | Out-Null })
+[void]$w.ShowDialog()
