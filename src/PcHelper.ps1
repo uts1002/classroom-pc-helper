@@ -611,55 +611,104 @@ function New-Dialog([double]$Width = 380) {
     $d
 }
 
-# 이름 + 설명 + 글 상자 + 예시 한 묶음. 글 상자를 돌려준다.
-function Add-Field($Panel, [string]$Label, [string]$Help, [string]$Value, [string]$Example) {
-    $l = New-Text $Label 15 -Bold -Bottom 2
+# 입력 칸 하나: 이름(굵게) → 둥근 글 상자(비어 있으면 흐린 예시) → 짧은 설명 한 줄(있을 때만).
+# 값이 틀리면 Show-FieldError가 테두리를 빨갛게 하고 설명 자리에 이유를 띄운다.
+function Add-Field($Panel, [string]$Label, [string]$Value, [string]$Placeholder = '', [string]$Help = '') {
+    $l = New-Text $Label 14 -Bold
+    $l.LineHeight = 20; $l.Margin = New-Object System.Windows.Thickness 0, 0, 0, 6
     [void]$Panel.Children.Add($l)
-    if ($Help) { [void]$Panel.Children.Add((New-Text $Help 13 $Colors.Sub -Bottom 8)) }
+
+    $frame = New-Object System.Windows.Controls.Border
+    $frame.CornerRadius = New-Object System.Windows.CornerRadius 8
+    $frame.BorderThickness = New-Object System.Windows.Thickness 1
+    $frame.BorderBrush = Brush '#D1D6DB'; $frame.Background = Brush $Colors.Card
+    $grid = New-Object System.Windows.Controls.Grid
+    $hint = New-Text $Placeholder 14.5 '#B0B8C1'
+    $hint.Margin = New-Object System.Windows.Thickness 12, 0, 12, 0
+    $hint.VerticalAlignment = 'Center'; $hint.IsHitTestVisible = $false; $hint.TextWrapping = 'NoWrap'
     $box = New-Object System.Windows.Controls.TextBox
-    $box.FontSize = 15; $box.Padding = New-Object System.Windows.Thickness 8, 6, 8, 6
+    $box.FontSize = 14.5; $box.BorderThickness = New-Object System.Windows.Thickness 0
+    $box.Background = Brush 'Transparent'; $box.Padding = New-Object System.Windows.Thickness 8, 9, 8, 9
     $box.Text = $Value
+    $hint.Visibility = $(if ($Value) { 'Collapsed' } else { 'Visible' })
     [System.Windows.Automation.AutomationProperties]::SetLabeledBy($box, $l)
-    [void]$Panel.Children.Add($box)
-    if ($Example) { [void]$Panel.Children.Add((New-Text $Example 12.5 $Colors.Faint -Bottom 16)) }
-    else { $box.Margin = New-Object System.Windows.Thickness 0, 0, 0, 16 }
-    $box
+    [void]$grid.Children.Add($hint); [void]$grid.Children.Add($box)
+    $frame.Child = $grid
+    [void]$Panel.Children.Add($frame)
+
+    # 처리기에서 쓸 것을 Tag에 담는다 (스크립트 함수는 이벤트 안에서 못 부를 때가 있어 붓도 미리 만든다).
+    $box.Tag = @{ Hint = $hint; Frame = $frame; On = (Brush $Colors.Primary); Off = (Brush '#D1D6DB') }
+    $box.Add_TextChanged({ $this.Tag.Hint.Visibility = $(if ($this.Text) { 'Collapsed' } else { 'Visible' }) })
+    $box.Add_GotKeyboardFocus({ $this.Tag.Frame.BorderBrush = $this.Tag.On })
+    $box.Add_LostKeyboardFocus({ $this.Tag.Frame.BorderBrush = $this.Tag.Off })
+
+    $note = New-Text $Help 12.5 $Colors.Faint
+    $note.LineHeight = 18; $note.Margin = New-Object System.Windows.Thickness 2, 6, 0, 0
+    if (-not $Help) { $note.Visibility = 'Collapsed' }
+    [void]$Panel.Children.Add($note)
+
+    $gap = New-Object System.Windows.Controls.Border
+    $gap.Height = 18
+    [void]$Panel.Children.Add($gap)
+    @{ Box = $box; Frame = $frame; Note = $note }
 }
 
-function Show-Warning([string]$Message) {
-    $owner = if ($script:Win -and $script:Win.IsVisible) { $script:Win } else { $panel }
-    [void][System.Windows.MessageBox]::Show($owner, $Message, $Config.AppName, 'OK', 'Warning')
+function Show-FieldError($Field, [string]$Message) {
+    $Field.Box.Tag.On = Brush $Colors.Bad; $Field.Box.Tag.Off = Brush $Colors.Bad
+    $Field.Frame.BorderBrush = Brush $Colors.Bad
+    $Field.Note.Text = $Message; $Field.Note.Foreground = Brush $Colors.Bad; $Field.Note.Visibility = 'Visible'
+    $Field.Box.Focus() | Out-Null
+    $Field.Box.SelectAll()
+}
+
+# 설정 창의 묶음 제목. 첫 묶음이 아니면 위에 옅은 줄을 긋는다.
+function Add-Section($Panel, [string]$Title, [switch]$First) {
+    if (-not $First) {
+        $line = New-Object System.Windows.Controls.Border
+        $line.Height = 1; $line.Background = Brush '#F0F2F4'
+        $line.Margin = New-Object System.Windows.Thickness 0, 2, 0, 20
+        [void]$Panel.Children.Add($line)
+    }
+    $t = New-Text $Title 12.5 $Colors.Faint -Bold
+    $t.LineHeight = 18; $t.Margin = New-Object System.Windows.Thickness 0, 0, 0, 12
+    [void]$Panel.Children.Add($t)
 }
 
 # 한 칸만 묻는 창. [확인]이면 적은 글, 닫으면 $null.
-function Read-Value([string]$Label, [string]$Help, [string]$Value, [string]$Example) {
-    $d = New-Dialog
+# Validate: 적은 글을 받아 틀렸으면 이유 문구, 맞으면 아무것도 돌려주지 않는 스크립트.
+function Read-Value([string]$Label, [string]$Value, [string]$Placeholder, [string]$Help, [scriptblock]$Validate) {
+    $d = New-Dialog 400
     $p = New-Object System.Windows.Controls.StackPanel
-    $p.Margin = New-Object System.Windows.Thickness 24
-    $box = Add-Field $p $Label $Help $Value $Example
-    $ok = New-Btn '확인' 'Primary' $null { $d.DialogResult = $true } 0
+    $p.Margin = New-Object System.Windows.Thickness 24, 22, 24, 22
+    $f = Add-Field $p $Label $Value $Placeholder $Help
+    $ok = New-Btn '확인' 'Primary' $null {
+        if ($Validate) {
+            $why = & $Validate $f.Box.Text.Trim()
+            if ($why) { Show-FieldError $f $why; return }
+        }
+        $d.DialogResult = $true
+    } 0
     $ok.IsDefault = $true
     [void]$p.Children.Add($ok)
     $d.Content = $p
-    $d.Add_ContentRendered({ $box.Focus() | Out-Null })
-    if ($d.ShowDialog()) { return $box.Text.Trim() }
+    $d.Add_ContentRendered({ $f.Box.Focus() | Out-Null })
+    if ($d.ShowDialog()) { return $f.Box.Text.Trim() }
     $null
 }
 
 function Read-RoomName {
-    Read-Value '우리 반(교실) 이름' '올리는 글 맨 앞에 붙어요. 한 번만 적으면 기억해요.' $script:Settings.RoomName '예: 5-빛솔, 4학년 연구실, 돌봄3반'
+    Read-Value '우리 반 이름' $script:Settings.RoomName '예: 5-빛솔, 4학년 연구실' '문의 글 맨 앞에 붙어요. 한 번만 적으면 돼요.'
 }
+
+$UrlError = '주소 모양이 아니에요. 인터넷 창 맨 위 주소를 복사해 붙여 넣어 주세요.'
 
 # 다른 학교 버전에서 문의 링크가 비어 있을 때 묻는다. 웹 주소만 받는다.
 function Read-AskUrl {
-    $text = ''
-    while ($true) {
-        $text = Read-Value '수리 문의 링크' '그래도 안 될 때 열 주소예요. 수리업체 밴드·카페·카카오톡 오픈채팅·홈페이지 주소를 붙여 넣으세요. 한 번만 적으면 기억해요.' $text '예: https://band.us/band/12345678'
-        if ($null -eq $text) { return $null }
-        $url = ConvertTo-WebUrl $text
-        if ($url) { return $url }
-        Show-Warning '주소 모양이 아니에요. 인터넷 창 맨 위 주소 칸의 주소를 복사해서 붙여 넣어 주세요.'
+    $text = Read-Value '수리 문의 링크' '' 'https://' '그래도 안 될 때 열 곳이에요. 수리업체 밴드·카페·오픈채팅·홈페이지 주소를 붙여 넣으세요.' {
+        param($t) if (-not (ConvertTo-WebUrl $t)) { $UrlError }
     }
+    if ($null -eq $text) { return $null }
+    ConvertTo-WebUrl $text
 }
 
 function Send-ToBand([string]$Symptom) {
@@ -712,47 +761,62 @@ function Send-ToBand([string]$Symptom) {
 $CreditUrl = 'https://eompage.com'
 
 function Show-SettingsWindow {
-    $d = New-Dialog 440
+    $d = New-Dialog 420
     $d.MaxHeight = [System.Windows.SystemParameters]::WorkArea.Height - 40
+    # 위: 입력 칸(길면 스크롤) / 아래: 버튼과 제작자 (늘 보이게 고정)
+    $layout = New-Object System.Windows.Controls.Grid
+    foreach ($h in '*', 'Auto') {
+        $r = New-Object System.Windows.Controls.RowDefinition
+        $r.Height = (New-Object System.Windows.GridLengthConverter).ConvertFromString($h)
+        $layout.RowDefinitions.Add($r)
+    }
     $scroll = New-Object System.Windows.Controls.ScrollViewer
     $scroll.VerticalScrollBarVisibility = 'Auto'
     $p = New-Object System.Windows.Controls.StackPanel
-    $p.Margin = New-Object System.Windows.Thickness 24, 20, 24, 16
+    $p.Margin = New-Object System.Windows.Thickness 24, 22, 24, 4
     $scroll.Content = $p
-    [void]$p.Children.Add((New-Text '설정' 20 -Bold -Bottom 16))
+    [void]$layout.Children.Add($scroll)
 
-    $room = Add-Field $p '우리 반(교실) 이름' '올리는 글 맨 앞에 붙어요.' $script:Settings.RoomName '예: 5-빛솔, 4학년 연구실, 돌봄3반'
-    $band = Add-Field $p '수리 문의 링크' '그래도 안 될 때 점검 내용을 복사해 두고 이 주소를 열어요. 수리업체 밴드·카페·카카오톡 오픈채팅·홈페이지 주소를 넣으세요.' `
-        (Get-Setting 'BandUrl') '비워 두면 처음 문의할 때 물어봐요.'
-    $contact = Add-Field $p '학교 안에서 물어볼 사람' '마이크 채널, 오피스 인증 코드, 한글 제품 키를 물어볼 분이에요.' (Get-Contact) '예: 정보부장님'
-    $o365 = Add-Field $p '오피스 365 가입센터 주소' '교육청마다 달라요. 오피스 설치·인증 안내에서 열어요.' (Get-Setting 'Office365Url') '예: https://o365.sje.go.kr'
+    $title = New-Text '설정' 20 -Bold
+    $title.LineHeight = 28; $title.Margin = New-Object System.Windows.Thickness 0, 0, 0, 20
+    [void]$p.Children.Add($title)
 
+    Add-Section $p '우리 반' -First
+    $room = Add-Field $p '반 이름' $script:Settings.RoomName '예: 5-빛솔, 4학년 연구실' '문의 글 맨 앞에 붙어요.'
+
+    Add-Section $p '도움 요청'
+    $band = Add-Field $p '수리 문의 링크' (Get-Setting 'BandUrl') 'https://' '그래도 안 될 때 여는 곳이에요. 밴드·카페·오픈채팅·홈페이지'
+    $contact = Add-Field $p '물어볼 분' (Get-Contact) '예: 정보부장님' '마이크 채널, 오피스·한글 인증을 여쭤볼 분'
+
+    Add-Section $p '그 밖에'
+    $o365 = Add-Field $p '오피스 365 가입센터' (Get-Setting 'Office365Url') 'https://' '교육청마다 주소가 달라요.'
     # 저장소에서 바로 실행할 때는 바로가기가 엉뚱한 곳을 가리키게 되므로 설치본에서만 바꿀 수 있다.
     $auto = New-Object System.Windows.Controls.CheckBox
-    $auto.Content = '윈도우 켤 때 자동으로 켜기'; $auto.FontSize = 15; $auto.VerticalContentAlignment = 'Center'
+    $auto.Content = '윈도우 켤 때 자동으로 켜기'; $auto.FontSize = 14.5; $auto.VerticalContentAlignment = 'Center'
     $auto.IsChecked = Test-Path (Get-StartupShortcutPath)
     $auto.IsEnabled = $AppDir -like "$env:LOCALAPPDATA\ClassroomPcHelper\*"
-    $auto.Margin = New-Object System.Windows.Thickness 0, 0, 0, 16
+    $auto.Margin = New-Object System.Windows.Thickness 0, 0, 0, 18
     [void]$p.Children.Add($auto)
 
-    $err = New-Text '' 13.5 $Colors.Bad -Bottom 10
-    $err.Visibility = 'Collapsed'
-    [void]$p.Children.Add($err)
+    $foot = New-Object System.Windows.Controls.Border
+    $foot.BorderBrush = Brush '#F0F2F4'; $foot.BorderThickness = New-Object System.Windows.Thickness 0, 1, 0, 0
+    $foot.Padding = New-Object System.Windows.Thickness 24, 16, 24, 14
+    [System.Windows.Controls.Grid]::SetRow($foot, 1)
+    $footStack = New-Object System.Windows.Controls.StackPanel
+    $foot.Child = $footStack
+    [void]$layout.Children.Add($foot)
 
     $row = New-Object System.Windows.Controls.Primitives.UniformGrid
     $row.Columns = 2
     $cancel = New-Btn '취소' 'Gray' $null { $d.DialogResult = $false } 0
     $cancel.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
     $save = New-Btn '저장' 'Primary' $null {
-        $url = ConvertTo-WebUrl $band.Text
-        $o = ConvertTo-WebUrl $o365.Text
-        if ($null -eq $url -or $null -eq $o) {
-            $err.Text = if ($null -eq $url) { '수리 문의 링크가 주소 모양이 아니에요. 인터넷 창 맨 위 주소 칸의 주소를 붙여 넣어 주세요.' } else { '오피스 365 가입센터 주소가 주소 모양이 아니에요.' }
-            $err.Visibility = 'Visible'
-            return
-        }
-        $c = $contact.Text.Trim()
-        $script:Settings.RoomName = $room.Text.Trim()
+        $url = ConvertTo-WebUrl $band.Box.Text
+        if ($null -eq $url) { Show-FieldError $band $UrlError; return }
+        $o = ConvertTo-WebUrl $o365.Box.Text
+        if ($null -eq $o) { Show-FieldError $o365 $UrlError; return }
+        $c = $contact.Box.Text.Trim()
+        $script:Settings.RoomName = $room.Box.Text.Trim()
         # config.json과 같으면 비워 둔다 (나중에 config.json이 바뀌면 그 값을 따르게). 문의 링크는 빈 값도 저장한다(다른 학교 버전).
         $script:Settings.BandUrl = if ($url -eq (ConvertTo-WebUrl $Config.BandUrl)) { $null } else { $url }
         $script:Settings.Contact = if (-not $c -or $c -eq $Config.Contact) { $null } else { $c }
@@ -764,21 +828,21 @@ function Show-SettingsWindow {
     $save.Margin = New-Object System.Windows.Thickness 4, 0, 0, 0
     $save.IsDefault = $true
     [void]$row.Children.Add($cancel); [void]$row.Children.Add($save)
-    [void]$p.Children.Add($row)
+    [void]$footStack.Children.Add($row)
 
     $credit = New-Object System.Windows.Controls.TextBlock
     $credit.FontSize = 12; $credit.Foreground = Brush $Colors.Faint
-    $credit.HorizontalAlignment = 'Center'; $credit.Margin = New-Object System.Windows.Thickness 0, 18, 0, 0
+    $credit.HorizontalAlignment = 'Center'; $credit.Margin = New-Object System.Windows.Thickness 0, 12, 0, 0
     [void]$credit.Inlines.Add('제작자: ')
     $link = New-Object System.Windows.Documents.Hyperlink
     [void]$link.Inlines.Add($CreditUrl)
     $link.Foreground = Brush $Colors.Sub; $link.Cursor = [System.Windows.Input.Cursors]::Hand
     $link.Add_Click({ Start-Process $CreditUrl })
     [void]$credit.Inlines.Add($link)
-    [void]$p.Children.Add($credit)
+    [void]$footStack.Children.Add($credit)
 
-    $d.Content = $scroll
-    $d.Add_ContentRendered({ $room.Focus() | Out-Null })
+    $d.Content = $layout
+    $d.Add_ContentRendered({ $room.Box.Focus() | Out-Null })
     if (-not $d.ShowDialog()) { return }
 
     # 바뀐 문구(밴드 ↔ 수리업체, 반 이름)를 바로 보여 준다.
