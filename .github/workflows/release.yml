@@ -1,5 +1,5 @@
 # v로 시작하는 태그(예: v0.2.0)를 올리면 릴리즈를 만든다.
-# 릴리즈 파일: app.zip(프로그램), version.txt(자동 업데이트 확인용), install.ps1, PcHelper-Setup.cmd(배포용 설치 파일)
+# 릴리즈 파일: app.zip(프로그램), version.txt(자동 업데이트 확인용), install.ps1, PcHelper-Setup.cmd(다정초용 설치 파일), PcHelper-Setup-General.cmd(다른 학교용)
 name: release
 
 on:
@@ -30,5 +30,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" app.zip version.txt install.ps1 PcHelper-Setup.cmd \
+          gh release create "$GITHUB_REF_NAME" app.zip version.txt install.ps1 PcHelper-Setup.cmd PcHelper-Setup-General.cmd \
             --title "PC 도우미 $GITHUB_REF_NAME" --notes-file notes.md

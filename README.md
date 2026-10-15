@@ -27,7 +27,9 @@
 
 ## 설치 (학교 PC, 선생님 계정으로)
 
-1. [최신 릴리즈](https://github.com/uts1002/classroom-pc-helper/releases/latest)에서 `PcHelper-Setup.cmd` 하나만 받는다.
+1. [최신 릴리즈](https://github.com/uts1002/classroom-pc-helper/releases/latest)에서 설치 파일 하나만 받는다.
+   - 다정초: `PcHelper-Setup.cmd` (수리 문의 링크에 다정초 정보 AS 밴드가 들어 있음)
+   - 다른 학교: `PcHelper-Setup-General.cmd` (문의 링크가 비어 있어, 처음 문의할 때 주소를 물어봄)
 2. 더블클릭한다. ("Windows의 PC 보호" 창이 뜨면 [추가 정보] → [실행])
    - 최신 버전을 받아 `%LOCALAPPDATA%\ClassroomPcHelper\app`에 설치하고, 로그인할 때마다 자동으로 켜진다.
    - 바탕화면에 `PC 도우미` 바로가기도 생긴다 (실수로 껐을 때 다시 켜는 용도).
@@ -49,7 +51,7 @@
 ```
 
 커밋된 상태에서 태그를 올리면 GitHub Actions(`.github/workflows/release.yml`)가 릴리즈를 만든다.
-릴리즈 파일: `app.zip`, `version.txt`, `install.ps1`, `PcHelper-Setup.cmd`. 버전 번호는 태그에서 정해진다.
+릴리즈 파일: `app.zip`, `version.txt`, `install.ps1`, `PcHelper-Setup.cmd`, `PcHelper-Setup-General.cmd`. 버전 번호는 태그에서 정해진다.
 
 이 저장소에 쓰기 권한이 있는 사람이 모든 설치 PC의 코드를 바꿀 수 있다. GitHub 계정 2단계 인증을 켜 둔다.
 
@@ -58,15 +60,23 @@
 - 패널의 [화면]·[터치]·[소리]·[프린터]·[인터넷]·[컴퓨터]·[프로그램]을 누른다.
 - 패널의 갈래마다 지금 상태가 한 줄로 보인다 (예: 소리 · 음소거). 주황·빨간 점이면 눌러서 점검한다.
 - 패널 제목(PC 도우미)을 끌면 위치를 옮길 수 있다. 위치는 기억한다.
-- 패널을 오른쪽 클릭하면 `작은 아이콘으로 숨기기`, `반 이름 다시 정하기`, `PC 도우미 끄기`, 버전이 있다.
+- 패널 오른쪽 위 톱니바퀴를 누르면 설정 창이 열린다: 반 이름, 수리 문의 링크, 학교 안에서 물어볼 사람, 오피스 365 가입센터 주소, 자동 실행. 맨 아래에 제작자 링크.
+- 패널을 오른쪽 클릭하면 `작은 아이콘으로 숨기기`, `설정`, `PC 도우미 끄기`, 버전이 있다.
 - 작업 표시줄 오른쪽 아래(알림 영역)에도 아이콘이 있다. 왼쪽 클릭은 패널 보이기/숨기기, 오른쪽 클릭은 갈래 바로 열기.
   숨긴 패널은 바탕화면 `PC 도우미` 바로가기를 다시 눌러도 나온다.
 - 윈도우를 켜면 자동으로 켜진다 (기본). 알림 영역 아이콘 오른쪽 클릭 → `윈도우 켤 때 자동 실행`으로 끄고 켠다.
-- 반 이름은 처음 밴드로 보낼 때 한 번 묻고 `%APPDATA%\ClassroomPcHelper\settings.json`에 저장한다.
+- 반 이름은 처음 밴드로 보낼 때 한 번 묻고 `%APPDATA%\ClassroomPcHelper\settings.json`에 저장한다. 설정 창에서 바꾼 값도 여기 저장된다(업데이트로 지워지지 않음).
+- **다정초 버전 / 다른 학교 버전**: 수리 문의 링크가 다정초 밴드 그대로면 다정초 버전(`밴드에 올리기`), 비었거나 다른 주소면
+  다른 학교 버전(`수리업체에 문의하기`)이다. 다른 학교 버전에서 링크가 비어 있으면 문의 버튼을 누를 때 주소 입력 창이 뜬다.
+  점검 안내 문구의 '밴드'도 화면에 띄울 때 '수리업체'로 바꾼다.
 
 ## 다른 학교에서 쓰려면
 
-저장소를 포크해서 `src/config.json`의 `BandName`, `BandUrl`, `Contact`(마이크 채널·인증 코드·제품 키를 물어볼 사람), `Office365Url`(교육청 오피스 365 가입센터), `UpdateRepo`와 `install.ps1`·`PcHelper-Setup.cmd`의 저장소 주소를 바꾼다.
+`PcHelper-Setup-General.cmd`로 설치하고, 톱니바퀴 설정 창에서 수리 문의 링크·물어볼 사람·오피스 365 가입센터 주소를 적는다.
+(문의 링크는 비워 두면 처음 문의할 때 묻는다.) 업데이트는 이 저장소에서 같이 받는다.
+
+학교 기본값 자체를 바꿔 배포하고 싶으면 저장소를 포크해서 `src/config.json`의 `BandName`, `BandUrl`, `Contact`, `Office365Url`, `UpdateRepo`와
+`install.ps1`·`PcHelper-Setup*.cmd`의 저장소 주소를 바꾼다.
 
 ## 구조
 
@@ -77,10 +87,11 @@ src/lib/Native.ps1   윈도우 기본 기능 호출 (소리 장치, 화면 복�
 src/lib/Update.ps1   자동 업데이트
 src/lib/Status.ps1   패널의 갈래별 '지금 상태' 한 줄 (1분마다 따로 읽기만)
 src/fonts/           Pretendard 글꼴 (SIL OFL 1.1, LICENSE.txt 동봉)
-src/config.json      밴드 주소, 업데이트 저장소, 물어볼 사람
+src/config.json      기본값: 밴드 주소, 업데이트 저장소, 물어볼 사람 (설정 창 값이 있으면 그것이 먼저)
 src/icon.ico         앱 아이콘 (16~64px는 비트맵, 256px는 PNG — 트레이가 PNG 작은 크기를 못 읽음)
 src/version.txt      버전 (릴리즈 때 태그로 채워짐)
-PcHelper-Setup.cmd   배포용 설치 파일 (최신 릴리즈를 받아 install.ps1 실행)
+PcHelper-Setup.cmd   배포용 설치 파일 (최신 릴리즈를 받아 install.ps1 실행) — 다정초용
+PcHelper-Setup-General.cmd  다른 학교용 (install.ps1 -General: 문의 링크를 비워 둠)
 src/uninstall.ps1    제거 ('설치된 앱' 목록의 [제거]가 실행)
 install.ps1 / release.ps1
 ```

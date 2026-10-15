@@ -6,8 +6,11 @@
 #  3. 바탕화면에 바로가기 (실수로 껐을 때 다시 켜는 용도)
 #  4. 윈도우 '설치된 앱' 목록에 등록 (거기서 [제거]로 지울 수 있게)
 #  5. 바로 실행. 이후 새 버전은 프로그램이 알아서 받는다.
+#
+#  -General: 다른 학교용. 문의 링크(다정초 밴드)를 비워 두어 처음 문의할 때 선생님이 주소를 적게 한다.
+#            설정은 프로그램 폴더 밖(%APPDATA%)에 두므로 자동 업데이트로 덮어써지지 않는다.
 
-param([string]$Repo = 'uts1002/classroom-pc-helper')
+param([string]$Repo = 'uts1002/classroom-pc-helper', [switch]$General)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -54,6 +57,20 @@ $lnk.Save()
 
 # 윈도우 '설치된 앱' 목록에 올려서 거기서 지울 수 있게 한다.
 Register-AppEntry $dest
+
+# 다른 학교용: 문의 링크를 빈 값으로 적어 둔다. 이미 링크를 적어 둔 PC는 그대로 둔다.
+if ($General) {
+    $settingsPath = Join-Path $env:APPDATA 'ClassroomPcHelper\settings.json'
+    $settings = [ordered]@{}
+    if (Test-Path $settingsPath) {
+        try { (Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $settings[$_.Name] = $_.Value } } catch { }
+    }
+    if ($null -eq $settings['BandUrl']) {
+        $settings['BandUrl'] = ''
+        New-Item -ItemType Directory -Path (Split-Path $settingsPath) -Force | Out-Null
+        [pscustomobject]$settings | ConvertTo-Json | Set-Content $settingsPath -Encoding UTF8
+    }
+}
 
 Start-Process $target $arguments
 $version = (Get-Content (Join-Path $dest 'version.txt') -Raw).Trim()

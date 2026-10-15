@@ -22,8 +22,8 @@ function Open-Settings([string]$Page) {
     New-Action '설정 창 열기' ([scriptblock]::Create("Start-Process 'ms-settings:$Page'; '설정 창을 열었어요. 위 순서대로 해 보세요.'"))
 }
 
-# 학교 안에서 물어볼 사람 (마이크 채널, 인증 코드·제품 키). config.json의 Contact.
-function Get-Contact { if ($Config.Contact) { $Config.Contact } else { '정보부장님' } }
+# 학교 안에서 물어볼 사람 (마이크 채널, 인증 코드·제품 키). 설정 창 값, 없으면 config.json의 Contact.
+function Get-Contact { $c = Get-Setting 'Contact'; if ($c) { $c } else { '정보부장님' } }
 
 # 버튼을 눌렀다가 확인 창에서 [아니요]를 고르면 이 문구를 돌려준다. '해 본 것'에 넣지 않는다.
 $script:CancelText = '취소했어요.'
@@ -720,8 +720,10 @@ function Get-HangulName {
 }
 
 function New-Office365Action {
-    $url = if ($Config.Office365Url) { $Config.Office365Url } else { 'https://o365.sje.go.kr' }
-    New-Action '오피스 365 가입센터 열기' ([scriptblock]::Create("Start-Process '$url'; '가입센터를 열었어요. 위 순서대로 해 보세요.'"))
+    $url = Get-Setting 'Office365Url'
+    if (-not $url) { $url = 'https://o365.sje.go.kr' }
+    # 주소는 선생님이 설정 창에서 적을 수 있어서 코드 글자로 끼워 넣지 않는다.
+    New-Action '오피스 365 가입센터 열기' { Start-Process $url; '가입센터를 열었어요. 위 순서대로 해 보세요.' }.GetNewClosure()
 }
 
 function Get-Office365Steps {

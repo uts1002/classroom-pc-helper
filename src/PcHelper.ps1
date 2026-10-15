@@ -38,19 +38,52 @@ $app.Add_DispatcherUnhandledException({
     } catch { }
 })
 
-# ───────────────────────── 사용자 설정 (반 이름, 패널 위치) ─────────────────────────
+# ───────────────────────── 사용자 설정 (반 이름, 문의 링크, 패널 위치) ─────────────────────────
 
 $SettingsPath = Join-Path $env:APPDATA 'ClassroomPcHelper\settings.json'
 
+# BandUrl·Contact·Office365Url: $null이면 config.json 값을 쓴다. 다른 학교용 설치는 BandUrl을 ''로 적어 둔다.
+$OverrideKeys = 'BandUrl', 'Contact', 'Office365Url'
+
 function Get-Settings {
-    $s = @{ RoomName = ''; Left = $null; Top = $null; Hidden = $false }
+    $s = @{ RoomName = ''; Left = $null; Top = $null; Hidden = $false; BandUrl = $null; Contact = $null; Office365Url = $null }
     if (Test-Path $SettingsPath) {
         try {
             $j = Get-Content $SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            foreach ($k in 'RoomName', 'Left', 'Top', 'Hidden') { if ($null -ne $j.$k) { $s[$k] = $j.$k } }
+            foreach ($k in @($s.Keys)) { if ($null -ne $j.$k) { $s[$k] = $j.$k } }
         } catch { }
     }
     $s
+}
+
+# 이 PC에서 쓰는 값: 설정 창에서 바꾼 값, 없으면 config.json 값.
+function Get-Setting([string]$Name) {
+    if ($null -ne $script:Settings[$Name]) { [string]$script:Settings[$Name] } else { [string]$Config.$Name }
+}
+
+# 다정초 버전 = 문의 링크가 config.json의 다정초 밴드 그대로. 아니면(비었거나 다른 곳) 다른 학교 버전.
+function Test-BandEdition {
+    $url = Get-Setting 'BandUrl'
+    [bool]$url -and $url -eq $Config.BandUrl
+}
+
+# 다른 학교 버전에서는 '밴드' 대신 '수리업체'로 말한다. 점검 안내 문구(Checks.ps1)도 화면에 띄울 때 바꾼다.
+function Get-AskLabel { if (Test-BandEdition) { '밴드에 올리기' } else { '수리업체에 문의하기' } }
+
+function Convert-AskText([string]$Text) {
+    if ((Test-BandEdition) -or -not $Text) { return $Text }
+    $Text -replace '\[밴드에 올리기\]', '[수리업체에 문의하기]' -replace '밴드에 올려 주세요', '수리업체에 문의해 주세요' `
+          -replace '밴드 글', '문의 글' -replace '밴드에', '수리업체에'
+}
+
+# 링크로 열어도 되는 주소인지 (웹 주소만). 'www.…'처럼 앞을 빼고 적으면 https://를 붙인다.
+function ConvertTo-WebUrl([string]$Text) {
+    $t = $Text.Trim()
+    if (-not $t) { return '' }
+    if ($t -notmatch '^[a-zA-Z][a-zA-Z0-9+.-]*://') { $t = "https://$t" }
+    $u = $null
+    if ([Uri]::TryCreate($t, 'Absolute', [ref]$u) -and $u.Scheme -in 'http', 'https' -and $u.Host -match '\.') { return $u.AbsoluteUri }
+    $null
 }
 
 function Save-Settings {
@@ -165,6 +198,7 @@ $(New-ButtonStyle 'Gray' $Colors.Bg $Colors.Text)
 $(New-ButtonStyle 'Outline' $Colors.Card $Colors.Text -Border '#D1D6DB' -HoverBg $Colors.Hover)
 $(New-ButtonStyle 'Item' $Colors.Card $Colors.Text -Border $Colors.Line -Radius 12 -Padding '14,12' -Align 'Stretch' -HoverBg $Colors.Hover -Weight 'Normal')
 $(New-ButtonStyle 'Plain' 'Transparent' $Colors.Sub -Weight 'Normal')
+$(New-ButtonStyle 'Icon' 'Transparent' $Colors.Faint -Radius 8 -Padding '6' -HoverBg $Colors.Bg -Weight 'Normal')
 </ResourceDictionary>
 "@
 $Styles = [Windows.Markup.XamlReader]::Parse($StyleXaml)
@@ -351,7 +385,7 @@ function Show-Symptoms {
     foreach ($sym in $g.Symptoms) {
         [void]$script:Body.Children.Add((New-RowButton $sym.Text $sym { Start-Check $this.Tag }))
     }
-    $other = New-Btn '여기 없는 문제예요 · 밴드에 올리기' 'Plain' $null { Send-ToBand -Symptom '목록에 없는 문제' } 0 -Icon 0xE724
+    $other = New-Btn "여기 없는 문제예요 · $(Get-AskLabel)" 'Plain' $null { Send-ToBand -Symptom '목록에 없는 문제' } 0 -Icon 0xE724
     $other.FontSize = 14
     [void]$script:Body.Children.Add($other)
     $script:Scroll.ScrollToTop()
@@ -409,13 +443,14 @@ function Show-Result {
         $i.VerticalAlignment = 'Top'; $i.Margin = New-Object System.Windows.Thickness 0, 3, 10, 0
         [System.Windows.Controls.DockPanel]::SetDock($i, 'Left')
         [void]$line.Children.Add($i)
-        [void]$line.Children.Add((New-Text $script:State.Notice 15 $Colors.PrimaryHover -Bold))
+        [void]$line.Children.Add((New-Text (Convert-AskText $script:State.Notice) 15 $Colors.PrimaryHover -Bold))
         [void]$n.Stack.Children.Add($line)
         [void]$script:Body.Children.Add($n.Border)
     }
 
     # 판정 카드: 큰 원 아이콘 + 판정 + 한 줄 설명
     $tone = $Tones[$r.Tone]; if (-not $tone) { $tone = $Tones['band'] }
+    $toneLabel = if ($r.Tone -eq 'band' -and -not (Test-BandEdition)) { '수리업체에 문의해 주세요' } else { $tone.Label }
     $hero = New-Box $tone.Tint -Bottom 14 -Radius 14
     $hero.Border.Padding = New-Object System.Windows.Thickness 16
     $heroRow = New-Object System.Windows.Controls.DockPanel
@@ -425,8 +460,8 @@ function Show-Result {
     [void]$heroRow.Children.Add($circle)
     $heroText = New-Object System.Windows.Controls.StackPanel
     $heroText.VerticalAlignment = 'Center'
-    [void]$heroText.Children.Add((New-Text $tone.Label 13 $tone.Color -Bold))
-    [void]$heroText.Children.Add((New-Text $r.Title 17 -Bold))
+    [void]$heroText.Children.Add((New-Text $toneLabel 13 $tone.Color -Bold))
+    [void]$heroText.Children.Add((New-Text (Convert-AskText $r.Title) 17 -Bold))
     [void]$heroRow.Children.Add($heroText)
     [void]$hero.Stack.Children.Add($heroRow)
     [void]$script:Body.Children.Add($hero.Border)
@@ -456,7 +491,7 @@ function Show-Result {
             $num.Child = $numText
             [System.Windows.Controls.DockPanel]::SetDock($num, 'Left')
             [void]$row.Children.Add($num)
-            [void]$row.Children.Add((New-Text $s 15))
+            [void]$row.Children.Add((New-Text (Convert-AskText $s) 15))
             [void]$script:Body.Children.Add($row)
             $n++
         }
@@ -504,7 +539,7 @@ function Show-Result {
     [void]$row.Children.Add($again); [void]$row.Children.Add($done)
     [void]$script:Footer.Children.Add($row)
     $bandStyle = if ($r.Tone -eq 'band') { 'Primary' } else { 'Outline' }
-    [void]$script:Footer.Children.Add((New-Btn '그래도 안 돼요 · 밴드에 올리기' $bandStyle $null { Send-ToBand } 0 -Icon 0xE724))
+    [void]$script:Footer.Children.Add((New-Btn "그래도 안 돼요 · $(Get-AskLabel)" $bandStyle $null { Send-ToBand } 0 -Icon 0xE724))
     $script:Scroll.ScrollToTop()
 }
 
@@ -561,27 +596,45 @@ function Confirm-Keep([int]$Seconds = 15) {
     [bool]$result
 }
 
-# ───────────────────────── 밴드로 보내기 ─────────────────────────
+# ───────────────────────── 밴드(수리업체)로 보내기 ─────────────────────────
 
-function Read-RoomName {
+# 작은 대화 창 틀. 패널 메뉴에서 부르면 도우미 창이 없거나 숨어 있다. 그때는 주 모니터 가운데에 띄운다.
+function New-Dialog([double]$Width = 380) {
     $d = New-Object System.Windows.Window
-    $d.Title = $Config.AppName; $d.Width = 380; $d.SizeToContent = 'Height'; $d.ResizeMode = 'NoResize'
-    # 패널 메뉴에서 부르면 도우미 창이 없거나 숨어 있다. 그때는 주 모니터 가운데에 띄운다.
+    $d.Title = $Config.AppName; $d.Width = $Width; $d.SizeToContent = 'Height'; $d.ResizeMode = 'NoResize'
     if ($script:Win -and $script:Win.IsVisible) { $d.WindowStartupLocation = 'CenterOwner'; $d.Owner = $script:Win }
     else { $d.WindowStartupLocation = 'CenterScreen' }
-    $d.Topmost = $true; $d.FontFamily = $FontFamily; $d.Icon = $AppIconImage
+    $d.Topmost = $true; $d.FontFamily = $FontFamily; $d.Icon = $AppIconImage; $d.Background = Brush $Colors.Card
     $d.Resources.MergedDictionaries.Add($Styles)
+    $d
+}
+
+# 이름 + 설명 + 글 상자 + 예시 한 묶음. 글 상자를 돌려준다.
+function Add-Field($Panel, [string]$Label, [string]$Help, [string]$Value, [string]$Example) {
+    $l = New-Text $Label 15 -Bold -Bottom 2
+    [void]$Panel.Children.Add($l)
+    if ($Help) { [void]$Panel.Children.Add((New-Text $Help 13 $Colors.Sub -Bottom 8)) }
+    $box = New-Object System.Windows.Controls.TextBox
+    $box.FontSize = 15; $box.Padding = New-Object System.Windows.Thickness 8, 6, 8, 6
+    $box.Text = $Value
+    [System.Windows.Automation.AutomationProperties]::SetLabeledBy($box, $l)
+    [void]$Panel.Children.Add($box)
+    if ($Example) { [void]$Panel.Children.Add((New-Text $Example 12.5 $Colors.Faint -Bottom 16)) }
+    else { $box.Margin = New-Object System.Windows.Thickness 0, 0, 0, 16 }
+    $box
+}
+
+function Show-Warning([string]$Message) {
+    $owner = if ($script:Win -and $script:Win.IsVisible) { $script:Win } else { $panel }
+    [void][System.Windows.MessageBox]::Show($owner, $Message, $Config.AppName, 'OK', 'Warning')
+}
+
+# 한 칸만 묻는 창. [확인]이면 적은 글, 닫으면 $null.
+function Read-Value([string]$Label, [string]$Help, [string]$Value, [string]$Example) {
+    $d = New-Dialog
     $p = New-Object System.Windows.Controls.StackPanel
     $p.Margin = New-Object System.Windows.Thickness 24
-    $label = New-Text '우리 반(교실) 이름' 15 -Bold -Bottom 4
-    [void]$p.Children.Add($label)
-    [void]$p.Children.Add((New-Text '밴드 글 맨 앞에 붙어요. 한 번만 적으면 기억해요.' 13 $Colors.Sub -Bottom 10))
-    $box = New-Object System.Windows.Controls.TextBox
-    $box.FontSize = 16; $box.Padding = New-Object System.Windows.Thickness 8, 6, 8, 6
-    $box.Text = $script:Settings.RoomName
-    [System.Windows.Automation.AutomationProperties]::SetLabeledBy($box, $label)
-    [void]$p.Children.Add($box)
-    [void]$p.Children.Add((New-Text '예: 5-빛솔, 4학년 연구실, 돌봄3반' 13 $Colors.Faint -Bottom 14))
+    $box = Add-Field $p $Label $Help $Value $Example
     $ok = New-Btn '확인' 'Primary' $null { $d.DialogResult = $true } 0
     $ok.IsDefault = $true
     [void]$p.Children.Add($ok)
@@ -591,11 +644,35 @@ function Read-RoomName {
     $null
 }
 
+function Read-RoomName {
+    Read-Value '우리 반(교실) 이름' '올리는 글 맨 앞에 붙어요. 한 번만 적으면 기억해요.' $script:Settings.RoomName '예: 5-빛솔, 4학년 연구실, 돌봄3반'
+}
+
+# 다른 학교 버전에서 문의 링크가 비어 있을 때 묻는다. 웹 주소만 받는다.
+function Read-AskUrl {
+    $text = ''
+    while ($true) {
+        $text = Read-Value '수리 문의 링크' '그래도 안 될 때 열 주소예요. 수리업체 밴드·카페·카카오톡 오픈채팅·홈페이지 주소를 붙여 넣으세요. 한 번만 적으면 기억해요.' $text '예: https://band.us/band/12345678'
+        if ($null -eq $text) { return $null }
+        $url = ConvertTo-WebUrl $text
+        if ($url) { return $url }
+        Show-Warning '주소 모양이 아니에요. 인터넷 창 맨 위 주소 칸의 주소를 복사해서 붙여 넣어 주세요.'
+    }
+}
+
 function Send-ToBand([string]$Symptom) {
     if (-not $script:Settings.RoomName) {
         $name = Read-RoomName
         if (-not $name) { return }
         $script:Settings.RoomName = $name
+        Save-Settings
+        Update-PanelSub
+    }
+    $url = ConvertTo-WebUrl (Get-Setting 'BandUrl')
+    if (-not $url) {
+        $url = Read-AskUrl
+        if (-not $url) { return }
+        $script:Settings.BandUrl = $url
         Save-Settings
     }
     $g = $Groups[$script:State.Group]
@@ -614,9 +691,10 @@ function Send-ToBand([string]$Symptom) {
     }
     $lines += "(PC 도우미로 점검 · PC 이름 $env:COMPUTERNAME)"
     Set-Clipboard -Value ($lines -join "`r`n")
-    Start-Process $Config.BandUrl
+    Start-Process $url
 
-    $script:State.Notice = "$($Config.BandName)를 열었어요. [글쓰기]를 누르고 Ctrl+V로 붙여 넣으세요. 점검 내용이 복사돼 있어요."
+    $script:State.Notice = if (Test-BandEdition) { "$($Config.BandName)를 열었어요. [글쓰기]를 누르고 Ctrl+V로 붙여 넣으세요. 점검 내용이 복사돼 있어요." }
+                           else { '수리 문의 페이지를 열었어요. 글 쓰는 칸에 Ctrl+V로 붙여 넣으세요. 점검 내용이 복사돼 있어요.' }
     if ($r) { Show-Result } else {
         $script:Body.Children.Clear()
         $n = New-Box $Colors.PrimaryLight
@@ -624,6 +702,86 @@ function Send-ToBand([string]$Symptom) {
         [void]$script:Body.Children.Add($n.Border)
         [void]$script:Body.Children.Add((New-Text '증상을 자세히 적어 주세요. (언제부터, 어떤 화면이 뜨는지, 사진이 있으면 함께)' 15 $Colors.Sub))
     }
+}
+
+# ───────────────────────── 설정 창 ─────────────────────────
+# 반 이름, 수리 문의 링크, 물어볼 사람, 오피스 365 가입센터, 자동 실행. 맨 아래 제작자 링크.
+
+$CreditUrl = 'https://eompage.com'
+
+function Show-SettingsWindow {
+    $d = New-Dialog 440
+    $d.MaxHeight = [System.Windows.SystemParameters]::WorkArea.Height - 40
+    $scroll = New-Object System.Windows.Controls.ScrollViewer
+    $scroll.VerticalScrollBarVisibility = 'Auto'
+    $p = New-Object System.Windows.Controls.StackPanel
+    $p.Margin = New-Object System.Windows.Thickness 24, 20, 24, 16
+    $scroll.Content = $p
+    [void]$p.Children.Add((New-Text '설정' 20 -Bold -Bottom 16))
+
+    $room = Add-Field $p '우리 반(교실) 이름' '올리는 글 맨 앞에 붙어요.' $script:Settings.RoomName '예: 5-빛솔, 4학년 연구실, 돌봄3반'
+    $band = Add-Field $p '수리 문의 링크' '그래도 안 될 때 점검 내용을 복사해 두고 이 주소를 열어요. 수리업체 밴드·카페·카카오톡 오픈채팅·홈페이지 주소를 넣으세요.' `
+        (Get-Setting 'BandUrl') '비워 두면 처음 문의할 때 물어봐요.'
+    $contact = Add-Field $p '학교 안에서 물어볼 사람' '마이크 채널, 오피스 인증 코드, 한글 제품 키를 물어볼 분이에요.' (Get-Contact) '예: 정보부장님'
+    $o365 = Add-Field $p '오피스 365 가입센터 주소' '교육청마다 달라요. 오피스 설치·인증 안내에서 열어요.' (Get-Setting 'Office365Url') '예: https://o365.sje.go.kr'
+
+    # 저장소에서 바로 실행할 때는 바로가기가 엉뚱한 곳을 가리키게 되므로 설치본에서만 바꿀 수 있다.
+    $auto = New-Object System.Windows.Controls.CheckBox
+    $auto.Content = '윈도우 켤 때 자동으로 켜기'; $auto.FontSize = 15; $auto.VerticalContentAlignment = 'Center'
+    $auto.IsChecked = Test-Path (Get-StartupShortcutPath)
+    $auto.IsEnabled = $AppDir -like "$env:LOCALAPPDATA\ClassroomPcHelper\*"
+    $auto.Margin = New-Object System.Windows.Thickness 0, 0, 0, 16
+    [void]$p.Children.Add($auto)
+
+    $err = New-Text '' 13.5 $Colors.Bad -Bottom 10
+    $err.Visibility = 'Collapsed'
+    [void]$p.Children.Add($err)
+
+    $row = New-Object System.Windows.Controls.Primitives.UniformGrid
+    $row.Columns = 2
+    $cancel = New-Btn '취소' 'Gray' $null { $d.DialogResult = $false } 0
+    $cancel.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
+    $save = New-Btn '저장' 'Primary' $null {
+        $url = ConvertTo-WebUrl $band.Text
+        $o = ConvertTo-WebUrl $o365.Text
+        if ($null -eq $url -or $null -eq $o) {
+            $err.Text = if ($null -eq $url) { '수리 문의 링크가 주소 모양이 아니에요. 인터넷 창 맨 위 주소 칸의 주소를 붙여 넣어 주세요.' } else { '오피스 365 가입센터 주소가 주소 모양이 아니에요.' }
+            $err.Visibility = 'Visible'
+            return
+        }
+        $c = $contact.Text.Trim()
+        $script:Settings.RoomName = $room.Text.Trim()
+        # config.json과 같으면 비워 둔다 (나중에 config.json이 바뀌면 그 값을 따르게). 문의 링크는 빈 값도 저장한다(다른 학교 버전).
+        $script:Settings.BandUrl = if ($url -eq (ConvertTo-WebUrl $Config.BandUrl)) { $null } else { $url }
+        $script:Settings.Contact = if (-not $c -or $c -eq $Config.Contact) { $null } else { $c }
+        $script:Settings.Office365Url = if (-not $o -or $o -eq (ConvertTo-WebUrl $Config.Office365Url)) { $null } else { $o }
+        Save-Settings
+        if ($auto.IsEnabled -and [bool]$auto.IsChecked -ne (Test-Path (Get-StartupShortcutPath))) { Set-AutoStart $AppDir ([bool]$auto.IsChecked) }
+        $d.DialogResult = $true
+    } 0
+    $save.Margin = New-Object System.Windows.Thickness 4, 0, 0, 0
+    $save.IsDefault = $true
+    [void]$row.Children.Add($cancel); [void]$row.Children.Add($save)
+    [void]$p.Children.Add($row)
+
+    $credit = New-Object System.Windows.Controls.TextBlock
+    $credit.FontSize = 12; $credit.Foreground = Brush $Colors.Faint
+    $credit.HorizontalAlignment = 'Center'; $credit.Margin = New-Object System.Windows.Thickness 0, 18, 0, 0
+    [void]$credit.Inlines.Add('제작자: ')
+    $link = New-Object System.Windows.Documents.Hyperlink
+    [void]$link.Inlines.Add($CreditUrl)
+    $link.Foreground = Brush $Colors.Sub; $link.Cursor = [System.Windows.Input.Cursors]::Hand
+    $link.Add_Click({ Start-Process $CreditUrl })
+    [void]$credit.Inlines.Add($link)
+    [void]$p.Children.Add($credit)
+
+    $d.Content = $scroll
+    $d.Add_ContentRendered({ $room.Focus() | Out-Null })
+    if (-not $d.ShowDialog()) { return }
+
+    # 바뀐 문구(밴드 ↔ 수리업체, 반 이름)를 바로 보여 준다.
+    Update-PanelSub
+    if ($script:Win -and $script:Win.IsVisible) { if ($script:State.Result) { Show-Result } else { Show-Symptoms } }
 }
 
 # ───────────────────────── 바탕화면 패널 ─────────────────────────
@@ -653,6 +811,13 @@ $logo.Source = $AppIconImage; $logo.Width = 28; $logo.Height = 28
 $logo.Margin = New-Object System.Windows.Thickness 0, 0, 10, 0
 [System.Windows.Controls.DockPanel]::SetDock($logo, 'Left')
 [void]$head.Children.Add($logo)
+# 오른쪽 위 톱니바퀴: 설정 창 (반 이름, 수리 문의 링크 등)
+$gear = New-Btn '' 'Icon' $null { Show-SettingsWindow } 0
+$gear.Content = New-Glyph 0xE713 16
+$gear.ToolTip = '설정'; $gear.VerticalAlignment = 'Center'
+[System.Windows.Automation.AutomationProperties]::SetName($gear, '설정')
+[System.Windows.Controls.DockPanel]::SetDock($gear, 'Right')
+[void]$head.Children.Add($gear)
 $headText = New-Object System.Windows.Controls.StackPanel
 $headText.VerticalAlignment = 'Center'
 [void]$headText.Children.Add((New-Text $Config.AppName 15 -Bold))
@@ -712,15 +877,6 @@ function Update-PanelStatus($Status) {
     }
 }
 
-function Set-RoomName {
-    $name = Read-RoomName
-    if (-not $name) { return }
-    $script:Settings.RoomName = $name
-    Save-Settings
-    Update-PanelSub
-    $tray.ShowBalloonTip(3000, $Config.AppName, "반 이름을 '$name'(으)로 정했어요.", 'Info')
-}
-
 # 패널을 숨기면 알림 영역(작업 표시줄 오른쪽 아래) 아이콘으로만 남는다.
 function Set-PanelHidden([bool]$Hidden) {
     $script:Settings.Hidden = $Hidden
@@ -737,12 +893,12 @@ function Set-PanelHidden([bool]$Hidden) {
 $menu = New-Object System.Windows.Controls.ContextMenu
 $hide = New-Object System.Windows.Controls.MenuItem; $hide.Header = '작은 아이콘으로 숨기기'
 $hide.Add_Click({ Set-PanelHidden $true })
-$reset = New-Object System.Windows.Controls.MenuItem; $reset.Header = '반 이름 다시 정하기'
-$reset.Add_Click({ Set-RoomName })
+$settingsItem = New-Object System.Windows.Controls.MenuItem; $settingsItem.Header = '설정'
+$settingsItem.Add_Click({ Show-SettingsWindow })
 $quit = New-Object System.Windows.Controls.MenuItem; $quit.Header = 'PC 도우미 끄기'
 $quit.Add_Click({ [System.Windows.Application]::Current.Shutdown() })
 $version = New-Object System.Windows.Controls.MenuItem; $version.Header = "버전 $(Get-AppVersion $AppDir)"; $version.IsEnabled = $false
-foreach ($item in $hide, $reset, $quit, $version) { [void]$menu.Items.Add($item) }
+foreach ($item in $hide, $settingsItem, $quit, $version) { [void]$menu.Items.Add($item) }
 $panel.ContextMenu = $menu
 
 # ───────────────────────── 알림 영역 아이콘 ─────────────────────────
@@ -762,7 +918,7 @@ foreach ($key in $Groups.Keys) {
 [void]$trayMenu.Items.Add('-')
 $trayToggle = $trayMenu.Items.Add('패널 보이기')
 $trayToggle.Add_Click({ Set-PanelHidden (-not $script:Settings.Hidden) })
-[void]$trayMenu.Items.Add('반 이름 다시 정하기').Add_Click({ Set-RoomName })
+[void]$trayMenu.Items.Add('설정').Add_Click({ Show-SettingsWindow })
 # 저장소에서 바로 실행할 때는 바로가기가 엉뚱한 곳을 가리키게 되므로 설치본에서만 바꿀 수 있다.
 $trayAuto = New-Object System.Windows.Forms.ToolStripMenuItem '윈도우 켤 때 자동 실행'
 $trayAuto.Enabled = $AppDir -like "$env:LOCALAPPDATA\ClassroomPcHelper\*"
