@@ -215,7 +215,9 @@ function Brush([string]$hex) { (New-Object System.Windows.Media.BrushConverter).
 # 프로그램 아이콘 (파란 바탕에 체크한 모니터). 창·알림 영역·바로가기에 같이 쓴다.
 $IconPath = Join-Path $AppDir 'icon.ico'
 $AppIcon = New-Object System.Drawing.Icon $IconPath, ([System.Windows.Forms.SystemInformation]::SmallIconSize)
-$AppIconImage = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]$IconPath)
+# 파일에서 바로 읽으면 켜져 있는 동안 icon.ico가 잠겨 업데이트가 덮어쓰지 못한다. 메모리로 읽어 둔다.
+$AppIconImage = [System.Windows.Media.Imaging.BitmapFrame]::Create(
+    (New-Object System.IO.MemoryStream (, [IO.File]::ReadAllBytes($IconPath))), 'None', 'OnLoad')
 Update-ShortcutIcon $AppDir
 Register-AppEntry $AppDir
 

@@ -22,8 +22,14 @@ function Open-Settings([string]$Page) {
     New-Action '설정 창 열기' ([scriptblock]::Create("Start-Process 'ms-settings:$Page'; '설정 창을 열었어요. 위 순서대로 해 보세요.'"))
 }
 
-# 학교 안에서 물어볼 사람 (마이크 채널, 인증 코드·제품 키). 설정 창 값, 없으면 config.json의 Contact.
-function Get-Contact { $c = Get-Setting 'Contact'; if ($c) { $c } else { '정보부장님' } }
+# 설정 창 값, 없으면 config.json 값.
+# 업데이트가 중간에 멈춰 예전 PcHelper.ps1(Get-Setting 없음)과 섞여 있어도 점검이 되게 config.json으로 물러선다.
+function Get-ConfigValue([string]$Name) {
+    if (Get-Command Get-Setting -ErrorAction SilentlyContinue) { Get-Setting $Name } else { [string]$Config.$Name }
+}
+
+# 학교 안에서 물어볼 사람 (마이크 채널, 인증 코드·제품 키).
+function Get-Contact { $c = Get-ConfigValue 'Contact'; if ($c) { $c } else { '정보부장님' } }
 
 # 버튼을 눌렀다가 확인 창에서 [아니요]를 고르면 이 문구를 돌려준다. '해 본 것'에 넣지 않는다.
 $script:CancelText = '취소했어요.'
@@ -720,7 +726,7 @@ function Get-HangulName {
 }
 
 function New-Office365Action {
-    $url = Get-Setting 'Office365Url'
+    $url = Get-ConfigValue 'Office365Url'
     if (-not $url) { $url = 'https://o365.sje.go.kr' }
     # 주소는 선생님이 설정 창에서 적을 수 있어서 코드 글자로 끼워 넣지 않는다.
     New-Action '오피스 365 가입센터 열기' { Start-Process $url; '가입센터를 열었어요. 위 순서대로 해 보세요.' }.GetNewClosure()

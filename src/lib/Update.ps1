@@ -37,11 +37,26 @@ function Install-Update([string]$AppDir, [string]$Repo) {
         if (-not (Test-Path (Join-Path $unpacked 'PcHelper.ps1'))) { return $false }
         if ((Get-AppVersion $unpacked) -ne $latest) { return $false }
 
-        Copy-Item (Join-Path $unpacked '*') $AppDir -Recurse -Force
+        Copy-AppFiles $unpacked $AppDir
         Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
         return $true
     } catch {
         return $false
+    }
+}
+
+# 파일을 하나씩 덮어쓴다. 실행 중인 프로그램이 잡고 있는 파일(예전 버전의 icon.ico)은 내용이 같으면 건너뛴다.
+# version.txt는 맨 마지막에 쓴다. 중간에 실패하면 버전이 그대로라 다음 확인 때 다시 받는다.
+function Copy-AppFiles([string]$From, [string]$To) {
+    $root = (Get-Item $From).FullName.TrimEnd('\')
+    $files = @(Get-ChildItem $root -Recurse -File)
+    $files = @($files | Where-Object Name -ne 'version.txt') + @($files | Where-Object Name -eq 'version.txt')
+    foreach ($f in $files) {
+        $dest = Join-Path $To $f.FullName.Substring($root.Length + 1)
+        if ((Test-Path $dest) -and (Get-FileHash $dest).Hash -eq (Get-FileHash $f.FullName).Hash) { continue }
+        $dir = Split-Path $dest
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Copy-Item $f.FullName $dest -Force -ErrorAction Stop
     }
 }
 
